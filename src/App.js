@@ -1,13 +1,12 @@
 import React, { useState, useCallback } from 'react';
 import { Upload, FileText, Download, Trash2, Edit2, Check, X, AlertCircle, Loader2 } from 'lucide-react';
 
-// Configuration
+// Configuration - Tout via n8n
 const CONFIG = {
-  N8N_URL: process.env.REACT_APP_N8N_URL || 'https://hen8n.com/webhook',
-  API_URL: process.env.REACT_APP_API_URL || '',  // Vercel API (même domaine)
+  N8N_URL: 'https://hen8n.com/webhook',
   ENDPOINTS: {
     EXTRACT: '/batch-extract',
-    GENERATE_EXCEL: '/api/generate-excel',
+    GENERATE_EXCEL: '/batch-generate-excel',
     RAG_LEARNING: '/rag-learning'
   }
 };
@@ -57,6 +56,19 @@ function App() {
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  // Convertir fichier en base64
+  const fileToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = error => reject(error);
+    });
+  };
+
   // Extraire les données des PDFs
   const extractInvoices = async () => {
     if (files.length === 0) {
@@ -68,45 +80,48 @@ function App() {
     setError(null);
 
     try {
-      const extractedInvoices = [];
+      // Préparer les factures avec base64
+      const invoicesData = await Promise.all(
+        files.map(async (file, index) => ({
+          base64: await fileToBase64(file),
+          filename: file.name,
+          invoiceNumber: getNextInvoiceNo(startingInvoiceNo, index)
+        }))
+      );
 
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const formData = new FormData();
-        formData.append('file', file);
+      // Appeler l'API d'extraction (n8n) - batch
+      const response = await fetch(`${CONFIG.N8N_URL}${CONFIG.ENDPOINTS.EXTRACT}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoices: invoicesData })
+      });
 
-        // Appeler l'API d'extraction (n8n)
-        const response = await fetch(`${CONFIG.N8N_URL}${CONFIG.ENDPOINTS.EXTRACT}`, {
-          method: 'POST',
-          body: formData
-        });
-
-        if (!response.ok) {
-          throw new Error(`Erreur extraction ${file.name}: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        
-        extractedInvoices.push({
-          id: i,
-          documentNo: getNextInvoiceNo(startingInvoiceNo, i),
-          fileName: file.name,
-          vendorNo: data.vendorNo || '',
-          vendorName: data.vendorName || '',
-          vendorInvoiceNo: data.vendorInvoiceNo || '',
-          amount: data.amount || 0,
-          glAccount: data.glAccount || '',
-          dimension1: data.dimension1 || '',
-          dimension2: data.dimension2 || '',
-          postingDate: data.postingDate || new Date().toISOString().split('T')[0],
-          dueDate: data.dueDate || '',
-          paymentReference: data.paymentReference || '',
-          description: data.description || '',
-          confidence: data.confidence || 0,
-          status: data.vendorNo ? (data.confidence >= 0.9 ? 'valid' : 'warning') : 'error',
-          modified: false
-        });
+      if (!response.ok) {
+        throw new Error(`Erreur extraction: ${response.statusText}`);
       }
+
+      const data = await response.json();
+      
+      // Mapper les résultats
+      const extractedInvoices = (data.invoices || []).map((inv, i) => ({
+        id: i,
+        documentNo: inv.invoiceNumber || getNextInvoiceNo(startingInvoiceNo, i),
+        fileName: inv.filename || files[i]?.name || `invoice_${i}.pdf`,
+        vendorNo: inv.vendorNo || '',
+        vendorName: inv.vendorName || '',
+        vendorInvoiceNo: inv.extractedInvoiceNumber || '',
+        amount: parseFloat(inv.amount) || 0,
+        glAccount: inv.glAccount || '',
+        dimension1: inv.dimension || '',
+        dimension2: '',
+        postingDate: inv.invoiceDate || new Date().toISOString().split('T')[0],
+        dueDate: '',
+        paymentReference: '',
+        description: inv.description || '',
+        confidence: inv.ocrSuccess ? 0.85 : 0.5,
+        status: inv.ocrSuccess ? 'warning' : 'error',
+        modified: false
+      }));
 
       setInvoices(extractedInvoices);
     } catch (err) {
@@ -120,7 +135,13 @@ function App() {
   const updateInvoice = (index, field, value) => {
     setInvoices(prev => prev.map((inv, i) => {
       if (i === index) {
-        return { ...inv, [field]: value, modified: true };
+        const updated = { ...inv, [field]: value, modified: true };
+        // Mettre à jour le statut si les champs obligatoires sont remplis
+        if (updated.vendorNo && updated.amount) {
+          updated.status = 'valid';
+          updated.confidence = 1.0;
+        }
+        return updated;
       }
       return inv;
     }));
@@ -147,7 +168,7 @@ function App() {
     }
   };
 
-  // Générer le package Excel
+  // Générer le package Excel (via n8n)
   const generateExcel = async () => {
     if (invoices.length === 0) {
       setError('Aucune facture à exporter');
@@ -163,8 +184,8 @@ function App() {
         await saveModifications(invoice);
       }
 
-      // Générer l'Excel (API Vercel locale)
-      const response = await fetch(`${CONFIG.API_URL}${CONFIG.ENDPOINTS.GENERATE_EXCEL}`, {
+      // Générer l'Excel via n8n
+      const response = await fetch(`${CONFIG.N8N_URL}${CONFIG.ENDPOINTS.GENERATE_EXCEL}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ invoices })
@@ -456,7 +477,7 @@ function App() {
 
         {/* Footer */}
         <div className="text-center text-gray-400 text-sm">
-          Batch Invoice Processor v1.0 • Intégré avec Business Central
+          Batch Invoice Processor v1.0 • Intégré avec Business Central via n8n
         </div>
       </div>
     </div>
