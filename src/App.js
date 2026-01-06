@@ -1,5 +1,9 @@
 import React, { useState, useCallback } from 'react';
 import { Upload, FileText, Download, Trash2, Edit2, Check, X, AlertCircle, Loader2 } from 'lucide-react';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configure PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 // Configuration - Tout via n8n
 const CONFIG = {
@@ -20,6 +24,7 @@ function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [editingIndex, setEditingIndex] = useState(null);
   const [error, setError] = useState(null);
+  const [progress, setProgress] = useState('');
 
   // Calculer le prochain numéro de facture
   const getNextInvoiceNo = (baseNo, index) => {
@@ -56,17 +61,29 @@ function App() {
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Convertir fichier en base64
-  const fileToBase64 = (file) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const base64 = reader.result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = error => reject(error);
-    });
+  // Convertir PDF en image (première page)
+  const pdfToImage = async (file) => {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const page = await pdf.getPage(1);
+    
+    // Render at 2x scale for better OCR quality
+    const scale = 2.0;
+    const viewport = page.getViewport({ scale });
+    
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    
+    await page.render({
+      canvasContext: context,
+      viewport: viewport
+    }).promise;
+    
+    // Convert to JPEG base64 (smaller than PNG)
+    const base64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+    return base64;
   };
 
   // Extraire les données des PDFs
@@ -78,16 +95,24 @@ function App() {
 
     setIsProcessing(true);
     setError(null);
+    setProgress('Conversion des PDFs en images...');
 
     try {
-      // Préparer les factures avec base64
-      const invoicesData = await Promise.all(
-        files.map(async (file, index) => ({
-          base64: await fileToBase64(file),
+      // Convertir tous les PDFs en images
+      const invoicesData = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setProgress(`Conversion ${i + 1}/${files.length}: ${file.name}`);
+        
+        const base64Image = await pdfToImage(file);
+        invoicesData.push({
+          base64: base64Image,
           filename: file.name,
-          invoiceNumber: getNextInvoiceNo(startingInvoiceNo, index)
-        }))
-      );
+          invoiceNumber: getNextInvoiceNo(startingInvoiceNo, i)
+        });
+      }
+
+      setProgress('Extraction OCR en cours...');
 
       // Appeler l'API d'extraction (n8n) - batch
       const response = await fetch(`${CONFIG.N8N_URL}${CONFIG.ENDPOINTS.EXTRACT}`, {
@@ -124,8 +149,10 @@ function App() {
       }));
 
       setInvoices(extractedInvoices);
+      setProgress('');
     } catch (err) {
       setError(`Erreur lors de l'extraction: ${err.message}`);
+      setProgress('');
     } finally {
       setIsProcessing(false);
     }
@@ -219,6 +246,7 @@ function App() {
     setInvoices([]);
     setError(null);
     setEditingIndex(null);
+    setProgress('');
   };
 
   // Rendu du statut
@@ -315,7 +343,7 @@ function App() {
                 {isProcessing ? (
                   <>
                     <Loader2 className="animate-spin mr-2" size={18} />
-                    Extraction en cours...
+                    {progress || 'Traitement...'}
                   </>
                 ) : (
                   <>Extraire les données</>
@@ -477,7 +505,7 @@ function App() {
 
         {/* Footer */}
         <div className="text-center text-gray-400 text-sm">
-          Batch Invoice Processor v1.0 • Intégré avec Business Central via n8n
+          Batch Invoice Processor v1.1 • Intégré avec Business Central via n8n
         </div>
       </div>
     </div>
