@@ -1,9 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import { Upload, FileText, Download, Trash2, Edit2, Check, X, AlertCircle, Loader2 } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
-
-// Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+import { Upload, FileText, Download, Trash2, Edit2, Check, X, AlertCircle, Loader2, QrCode } from 'lucide-react';
+import { PDFProcessor } from './lib/pdf-processor';
 
 // Configuration - Tout via n8n
 const CONFIG = {
@@ -61,31 +58,6 @@ function App() {
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Convertir PDF en image (première page)
-  const pdfToImage = async (file) => {
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    const page = await pdf.getPage(1);
-    
-    // Render at 2x scale for better OCR quality
-    const scale = 2.0;
-    const viewport = page.getViewport({ scale });
-    
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    
-    await page.render({
-      canvasContext: context,
-      viewport: viewport
-    }).promise;
-    
-    // Convert to JPEG base64 (smaller than PNG)
-    const base64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
-    return base64;
-  };
-
   // Extraire les données des PDFs
   const extractInvoices = async () => {
     if (files.length === 0) {
@@ -95,58 +67,85 @@ function App() {
 
     setIsProcessing(true);
     setError(null);
-    setProgress('Conversion des PDFs en images...');
 
     try {
-      // Convertir tous les PDFs en images
-      const invoicesData = [];
+      const extractedInvoices = [];
+
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        setProgress(`Conversion ${i + 1}/${files.length}: ${file.name}`);
-        
-        const base64Image = await pdfToImage(file);
-        invoicesData.push({
-          base64: base64Image,
-          filename: file.name,
-          invoiceNumber: getNextInvoiceNo(startingInvoiceNo, i)
+        setProgress(`Traitement ${i + 1}/${files.length}: ${file.name}`);
+
+        // Process PDF - extract QR code and image
+        const processor = new PDFProcessor((p) => {
+          setProgress(`${file.name}: ${p.message}`);
         });
+
+        const result = await processor.processPDF(file);
+        
+        // Prepare invoice data
+        const invoiceNumber = getNextInvoiceNo(startingInvoiceNo, i);
+        
+        let invoiceData = {
+          id: i,
+          documentNo: invoiceNumber,
+          fileName: file.name,
+          hasQR: result.hasQR,
+          vendorNo: '',
+          vendorName: result.invoiceData?.vendorName || '',
+          vendorAddress: result.invoiceData?.vendorAddress || '',
+          vendorIBAN: result.invoiceData?.vendorIBAN || '',
+          debtorName: result.invoiceData?.debtorName || '',
+          vendorInvoiceNo: '',
+          amount: result.invoiceData?.amount || 0,
+          currency: result.invoiceData?.currency || 'CHF',
+          glAccount: '',
+          dimension1: '',
+          dimension2: '',
+          postingDate: new Date().toISOString().split('T')[0],
+          dueDate: '',
+          paymentReference: result.invoiceData?.paymentReference || '',
+          referenceType: result.invoiceData?.referenceType || '',
+          description: result.invoiceData?.message || '',
+          confidence: result.hasQR ? 0.9 : 0.3,
+          status: result.hasQR ? 'warning' : 'error',
+          modified: false
+        };
+
+        // If we have QR data but need OCR for additional info, send to n8n
+        if (result.imageBase64) {
+          try {
+            const ocrResponse = await fetch(`${CONFIG.N8N_URL}${CONFIG.ENDPOINTS.EXTRACT}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                invoices: [{
+                  base64: result.imageBase64,
+                  filename: file.name,
+                  invoiceNumber: invoiceNumber,
+                  qrData: result.invoiceData // Send QR data for enrichment
+                }]
+              })
+            });
+
+            if (ocrResponse.ok) {
+              const ocrData = await ocrResponse.json();
+              if (ocrData.invoices && ocrData.invoices[0]) {
+                const ocr = ocrData.invoices[0];
+                // Merge OCR data with QR data (QR takes priority)
+                invoiceData.vendorInvoiceNo = ocr.extractedInvoiceNumber || '';
+                invoiceData.description = invoiceData.description || ocr.description || '';
+                if (!invoiceData.vendorName && ocr.vendorName) {
+                  invoiceData.vendorName = ocr.vendorName;
+                }
+              }
+            }
+          } catch (ocrErr) {
+            console.log('OCR enrichment failed, using QR data only:', ocrErr);
+          }
+        }
+
+        extractedInvoices.push(invoiceData);
       }
-
-      setProgress('Extraction OCR en cours...');
-
-      // Appeler l'API d'extraction (n8n) - batch
-      const response = await fetch(`${CONFIG.N8N_URL}${CONFIG.ENDPOINTS.EXTRACT}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoices: invoicesData })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Erreur extraction: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      
-      // Mapper les résultats
-      const extractedInvoices = (data.invoices || []).map((inv, i) => ({
-        id: i,
-        documentNo: inv.invoiceNumber || getNextInvoiceNo(startingInvoiceNo, i),
-        fileName: inv.filename || files[i]?.name || `invoice_${i}.pdf`,
-        vendorNo: inv.vendorNo || '',
-        vendorName: inv.vendorName || '',
-        vendorInvoiceNo: inv.extractedInvoiceNumber || '',
-        amount: parseFloat(inv.amount) || 0,
-        glAccount: inv.glAccount || '',
-        dimension1: inv.dimension || '',
-        dimension2: '',
-        postingDate: inv.invoiceDate || new Date().toISOString().split('T')[0],
-        dueDate: '',
-        paymentReference: '',
-        description: inv.description || '',
-        confidence: inv.ocrSuccess ? 0.85 : 0.5,
-        status: inv.ocrSuccess ? 'warning' : 'error',
-        modified: false
-      }));
 
       setInvoices(extractedInvoices);
       setProgress('');
@@ -163,7 +162,6 @@ function App() {
     setInvoices(prev => prev.map((inv, i) => {
       if (i === index) {
         const updated = { ...inv, [field]: value, modified: true };
-        // Mettre à jour le statut si les champs obligatoires sont remplis
         if (updated.vendorNo && updated.amount) {
           updated.status = 'valid';
           updated.confidence = 1.0;
@@ -187,7 +185,9 @@ function App() {
           vendorNo: invoice.vendorNo,
           glAccount: invoice.glAccount,
           dimension1: invoice.dimension1,
-          dimension2: invoice.dimension2
+          dimension2: invoice.dimension2,
+          debtorName: invoice.debtorName,
+          paymentReference: invoice.paymentReference
         })
       });
     } catch (err) {
@@ -206,12 +206,10 @@ function App() {
     setError(null);
 
     try {
-      // Envoyer les modifications au RAG
       for (const invoice of invoices) {
         await saveModifications(invoice);
       }
 
-      // Générer l'Excel via n8n
       const response = await fetch(`${CONFIG.N8N_URL}${CONFIG.ENDPOINTS.GENERATE_EXCEL}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -222,7 +220,6 @@ function App() {
         throw new Error(`Erreur génération: ${response.statusText}`);
       }
 
-      // Télécharger le fichier
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -250,12 +247,15 @@ function App() {
   };
 
   // Rendu du statut
-  const renderStatus = (status, confidence) => {
+  const renderStatus = (invoice) => {
+    const { status, confidence, hasQR } = invoice;
+    const icon = hasQR ? <QrCode size={14} className="mr-1" /> : null;
+    
     switch (status) {
       case 'valid':
-        return <span className="flex items-center text-green-600"><Check size={16} className="mr-1" /> {Math.round(confidence * 100)}%</span>;
+        return <span className="flex items-center text-green-600">{icon}<Check size={16} className="mr-1" /> {Math.round(confidence * 100)}%</span>;
       case 'warning':
-        return <span className="flex items-center text-yellow-600"><AlertCircle size={16} className="mr-1" /> {Math.round(confidence * 100)}%</span>;
+        return <span className="flex items-center text-yellow-600">{icon}<AlertCircle size={16} className="mr-1" /> {Math.round(confidence * 100)}%</span>;
       case 'error':
         return <span className="flex items-center text-red-600"><X size={16} className="mr-1" /> À compléter</span>;
       default:
@@ -272,7 +272,7 @@ function App() {
             📦 Batch Invoice Processor
           </h1>
           <p className="text-gray-600">
-            Importez vos factures PDF et générez un package Excel pour Business Central
+            Importez vos factures PDF avec QR-code Swiss et générez un package Excel pour Business Central
           </p>
         </div>
 
@@ -346,7 +346,10 @@ function App() {
                     {progress || 'Traitement...'}
                   </>
                 ) : (
-                  <>Extraire les données</>
+                  <>
+                    <QrCode className="mr-2" size={18} />
+                    Extraire les données
+                  </>
                 )}
               </button>
             </div>
@@ -374,12 +377,12 @@ function App() {
                 <thead>
                   <tr className="bg-gray-50 text-left">
                     <th className="px-4 py-3 font-medium text-gray-600">N° BC</th>
-                    <th className="px-4 py-3 font-medium text-gray-600">Fichier</th>
                     <th className="px-4 py-3 font-medium text-gray-600">Fournisseur</th>
-                    <th className="px-4 py-3 font-medium text-gray-600">Réf. fourn.</th>
+                    <th className="px-4 py-3 font-medium text-gray-600">IBAN</th>
+                    <th className="px-4 py-3 font-medium text-gray-600">Référence</th>
                     <th className="px-4 py-3 font-medium text-gray-600">Montant</th>
+                    <th className="px-4 py-3 font-medium text-gray-600">N° Fourn.</th>
                     <th className="px-4 py-3 font-medium text-gray-600">Compte</th>
-                    <th className="px-4 py-3 font-medium text-gray-600">Dim. 2</th>
                     <th className="px-4 py-3 font-medium text-gray-600">Statut</th>
                     <th className="px-4 py-3 font-medium text-gray-600">Actions</th>
                   </tr>
@@ -387,42 +390,47 @@ function App() {
                 <tbody>
                   {invoices.map((invoice, index) => (
                     <tr key={invoice.id} className={`border-t ${invoice.modified ? 'bg-yellow-50' : ''}`}>
-                      <td className="px-4 py-3 font-mono">{invoice.documentNo}</td>
-                      <td className="px-4 py-3 text-gray-500 truncate max-w-xs">{invoice.fileName}</td>
+                      <td className="px-4 py-3 font-mono text-xs">{invoice.documentNo}</td>
+                      <td className="px-4 py-3">
+                        <div className="max-w-xs">
+                          <div className="font-medium truncate">{invoice.vendorName || '—'}</div>
+                          {invoice.debtorName && (
+                            <div className="text-xs text-gray-500 truncate">Débiteur: {invoice.debtorName}</div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs">{invoice.vendorIBAN || '—'}</td>
+                      <td className="px-4 py-3">
+                        <div className="max-w-xs">
+                          <div className="font-mono text-xs truncate">{invoice.paymentReference || '—'}</div>
+                          {invoice.referenceType && (
+                            <div className="text-xs text-gray-400">{invoice.referenceType}</div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 font-mono font-medium">
+                        {editingIndex === index ? (
+                          <input
+                            type="number"
+                            value={invoice.amount}
+                            onChange={(e) => updateInvoice(index, 'amount', parseFloat(e.target.value))}
+                            className="border rounded px-2 py-1 w-24"
+                          />
+                        ) : (
+                          <span>{invoice.amount.toLocaleString('fr-CH')} {invoice.currency}</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         {editingIndex === index ? (
                           <input
                             type="text"
                             value={invoice.vendorNo}
                             onChange={(e) => updateInvoice(index, 'vendorNo', e.target.value)}
-                            className="border rounded px-2 py-1 w-24"
+                            className="border rounded px-2 py-1 w-20"
+                            placeholder="F00XXX"
                           />
                         ) : (
-                          <span>{invoice.vendorNo || '—'}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        {editingIndex === index ? (
-                          <input
-                            type="text"
-                            value={invoice.vendorInvoiceNo}
-                            onChange={(e) => updateInvoice(index, 'vendorInvoiceNo', e.target.value)}
-                            className="border rounded px-2 py-1 w-32"
-                          />
-                        ) : (
-                          <span>{invoice.vendorInvoiceNo || '—'}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 font-mono">
-                        {editingIndex === index ? (
-                          <input
-                            type="number"
-                            value={invoice.amount}
-                            onChange={(e) => updateInvoice(index, 'amount', parseFloat(e.target.value))}
-                            className="border rounded px-2 py-1 w-28"
-                          />
-                        ) : (
-                          <span>{invoice.amount.toLocaleString('fr-CH')} CHF</span>
+                          <span className="font-mono">{invoice.vendorNo || '—'}</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -431,25 +439,13 @@ function App() {
                             type="text"
                             value={invoice.glAccount}
                             onChange={(e) => updateInvoice(index, 'glAccount', e.target.value)}
-                            className="border rounded px-2 py-1 w-28"
+                            className="border rounded px-2 py-1 w-20"
                           />
                         ) : (
                           <span className="font-mono">{invoice.glAccount || '—'}</span>
                         )}
                       </td>
-                      <td className="px-4 py-3">
-                        {editingIndex === index ? (
-                          <input
-                            type="text"
-                            value={invoice.dimension2}
-                            onChange={(e) => updateInvoice(index, 'dimension2', e.target.value)}
-                            className="border rounded px-2 py-1 w-16"
-                          />
-                        ) : (
-                          <span>{invoice.dimension2 || '—'}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">{renderStatus(invoice.status, invoice.confidence)}</td>
+                      <td className="px-4 py-3">{renderStatus(invoice)}</td>
                       <td className="px-4 py-3">
                         {editingIndex === index ? (
                           <button
@@ -505,7 +501,7 @@ function App() {
 
         {/* Footer */}
         <div className="text-center text-gray-400 text-sm">
-          Batch Invoice Processor v1.1 • Intégré avec Business Central via n8n
+          Batch Invoice Processor v1.2 • QR-code Swiss + OCR • Business Central
         </div>
       </div>
     </div>
