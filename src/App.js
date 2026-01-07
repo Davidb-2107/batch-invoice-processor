@@ -92,6 +92,8 @@ function App() {
           hasQR: result.hasQR,
           vendorNo: '',
           vendorName: result.invoiceData?.vendorName || '',
+          vendorNameBC: '',
+          canton: '',
           vendorAddress: result.invoiceData?.vendorAddress || '',
           vendorIBAN: result.invoiceData?.vendorIBAN || '',
           debtorName: result.invoiceData?.debtorName || '',
@@ -131,11 +133,25 @@ function App() {
               const ocrData = await ocrResponse.json();
               if (ocrData.invoices && ocrData.invoices[0]) {
                 const ocr = ocrData.invoices[0];
-                // Merge OCR data with QR data (QR takes priority)
+                
+                // BC Vendor lookup results
+                invoiceData.vendorNo = ocr.vendorNo || '';
+                invoiceData.vendorNameBC = ocr.vendorNameBC || '';
+                invoiceData.canton = ocr.canton || '';
+                
+                // OCR extracted data
                 invoiceData.vendorInvoiceNo = ocr.extractedInvoiceNumber || '';
                 invoiceData.description = invoiceData.description || ocr.description || '';
+                
+                // Update vendor name from BC if not from QR
                 if (!invoiceData.vendorName && ocr.vendorName) {
                   invoiceData.vendorName = ocr.vendorName;
+                }
+                
+                // Update status based on vendor found
+                if (ocr.vendorFound && ocr.vendorNo) {
+                  invoiceData.status = 'valid';
+                  invoiceData.confidence = parseFloat(ocr.vendorConfidence) || 1.0;
                 }
               }
             }
@@ -394,8 +410,11 @@ function App() {
                       <td className="px-4 py-3">
                         <div className="max-w-xs">
                           <div className="font-medium truncate">{invoice.vendorName || '—'}</div>
-                          {invoice.debtorName && (
-                            <div className="text-xs text-gray-500 truncate">Débiteur: {invoice.debtorName}</div>
+                          {invoice.vendorNameBC && invoice.vendorNameBC !== invoice.vendorName && (
+                            <div className="text-xs text-blue-600 truncate">BC: {invoice.vendorNameBC}</div>
+                          )}
+                          {invoice.canton && (
+                            <div className="text-xs text-gray-500">Canton: {invoice.canton}</div>
                           )}
                         </div>
                       </td>
@@ -430,7 +449,9 @@ function App() {
                             placeholder="F00XXX"
                           />
                         ) : (
-                          <span className="font-mono">{invoice.vendorNo || '—'}</span>
+                          <span className={`font-mono ${invoice.vendorNo ? 'text-green-600 font-medium' : ''}`}>
+                            {invoice.vendorNo || '—'}
+                          </span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -501,7 +522,7 @@ function App() {
 
         {/* Footer */}
         <div className="text-center text-gray-400 text-sm">
-          Batch Invoice Processor v1.2 • QR-code Swiss + OCR • Business Central
+          Batch Invoice Processor v1.3 • QR-code Swiss + OCR + BC Vendor Lookup • Business Central
         </div>
       </div>
     </div>
