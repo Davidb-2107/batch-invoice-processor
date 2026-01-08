@@ -1,76 +1,188 @@
-# Batch Invoice Processor
+# 📦 Batch Invoice Processor
 
-Interface web pour traiter des factures PDF et générer un package Excel pour Business Central.
+Application web pour le traitement en lot de factures PDF suisses avec QR-code, extraction OCR et génération de packages Excel pour Microsoft Dynamics 365 Business Central.
 
-## Fonctionnalités
+![Version](https://img.shields.io/badge/version-1.3-blue)
+![React](https://img.shields.io/badge/React-18-61dafb)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-- 📄 Import de multiples factures PDF par drag & drop
-- 🔍 Extraction automatique des données via OCR (n8n + Tesseract)
-- 🤖 Enrichissement RAG (mapping fournisseur → N° BC, compte G/L)
-- ✏️ Validation et édition des données
-- 📦 Génération du package Excel BC (Configuration Packages)
+## 🎯 Fonctionnalités
 
-## Architecture
+- **📷 Scan QR Swiss Payment Code** - Extraction automatique des données de paiement (IBAN, référence, montant)
+- **🔍 OCR Tesseract** - Reconnaissance optique pour données complémentaires
+- **🏢 BC Vendor Lookup** - Recherche automatique du fournisseur dans Business Central via IBAN
+- **📊 Export Excel** - Génération de packages d'import pour BC Configuration Packages
+- **🧠 RAG Learning** - Apprentissage des associations fournisseur/compte pour amélioration continue
+
+## 🏗️ Architecture
 
 ```
-┌─────────┐     ┌───────────────┐     ┌──────────────┐     ┌─────────────┐
-│  PDFs   │────▶│ n8n Batch     │────▶│  Interface   │────▶│ Vercel API  │
-│ (batch) │     │ Extract (sync)│     │  Validation  │     │ Generate    │
-└─────────┘     └───────────────┘     └──────────────┘     └─────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        FRONTEND (Vercel)                         │
+│  React App - QR Scanner - Invoice Editor - Excel Generator       │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         BACKEND (n8n VPS)                        │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │ Batch Extract│  │Generate Excel│  │ RAG Learning │          │
+│  │   Workflow   │  │   Workflow   │  │   Workflow   │          │
+│  └──────┬───────┘  └──────────────┘  └──────────────┘          │
+│         │                                                        │
+│         ▼                                                        │
+│  ┌──────────────┐  ┌──────────────┐                            │
+│  │ Tesseract    │  │  PostgreSQL  │                            │
+│  │    OCR       │  │ (Neon - EU)  │                            │
+│  └──────────────┘  └──────────────┘                            │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Déploiement
+## 🚀 Déploiement
 
-### Prérequis
+### Frontend (Vercel)
+- **URL Production** : https://batch-invoice-processor.vercel.app
+- **Déploiement** : Automatique sur push vers `main`
 
-- Node.js 18+
-- Compte Vercel
-- n8n avec workflow batch-extract configuré
+### Backend (n8n sur VPS)
+- **URL** : https://hen8n.com
+- **Workflows** :
+  - `Batch Extract - Invoice Processor` (ID: U7TyGzvkwHiICE8H)
+  - `Batch Generate Excel - BC Package` (ID: dgeGUvUH6kBenAA2)
 
-### Installation
+### Base de données (Neon PostgreSQL)
+- **Région** : Frankfurt (EU - GDPR compliant)
+- **Database** : `invoice-rag`
+- **Table principale** : `bc_vendors_prod` (21 vendors BC)
+
+## 📁 Structure du Projet
+
+```
+batch-invoice-processor/
+├── src/
+│   ├── App.js                 # Composant principal React
+│   ├── index.js               # Point d'entrée
+│   └── lib/
+│       ├── pdf-processor.js   # Conversion PDF → Image
+│       └── qr-parser.js       # Parser Swiss QR Payment Code
+├── api/                       # Vercel Serverless Functions (legacy)
+├── public/
+│   └── index.html
+├── docs/
+│   └── HANDOFF.md            # Documentation technique complète
+├── package.json
+├── vercel.json
+└── README.md
+```
+
+## 🔧 Configuration
+
+### Variables d'environnement
+
+```env
+# N8N Webhooks
+REACT_APP_N8N_URL=https://hen8n.com/webhook
+
+# Endpoints
+REACT_APP_EXTRACT_ENDPOINT=/batch-extract
+REACT_APP_GENERATE_ENDPOINT=/batch-generate-excel
+REACT_APP_RAG_ENDPOINT=/rag-learning
+```
+
+### n8n Credentials requises
+- **Neon Invoice-RAG** : PostgreSQL connection (ID: LPLhfJ2K18rp4Geu)
+
+## 📖 Utilisation
+
+1. **Glisser-déposer** des factures PDF avec QR-code Swiss
+2. **Extraire les données** - Le système scanne le QR, effectue l'OCR et recherche le fournisseur BC
+3. **Vérifier/Corriger** - Éditer les champs si nécessaire
+4. **Générer Excel** - Télécharger le package pour import dans BC
+
+## 🔄 Workflow n8n - Batch Extract
+
+```
+Webhook → Split Invoices → Tesseract OCR → Extract Invoice Data
+    → Vendor Lookup (PostgreSQL) → Merge Vendor Data → Aggregate Results → Respond
+```
+
+### Vendor Lookup Query
+```sql
+SELECT vendor_no, name, canton, iban, 1.0 as confidence
+FROM bc_vendors_prod
+WHERE iban = $1
+UNION ALL
+SELECT vendor_no, name, canton, iban, 0.8 as confidence
+FROM bc_vendors_prod
+WHERE LOWER(search_name) LIKE LOWER($2)
+ORDER BY confidence DESC
+LIMIT 1
+```
+
+## 📊 Format de Réponse API
+
+```json
+{
+  "success": true,
+  "count": 1,
+  "invoices": [{
+    "filename": "invoice.pdf",
+    "invoiceNumber": "FA182010",
+    "vendorName": "Steuerverwaltung Thurgau",
+    "vendorIBAN": "CH9830000010850000725",
+    "vendorNo": "F000050",
+    "vendorNameBC": "Steuerverwaltung Thurgau Quellensteuer",
+    "canton": "TG",
+    "vendorFound": true,
+    "vendorConfidence": "1.0",
+    "amount": "41.30",
+    "paymentReference": "11 00000 00013 99416 00181 95183"
+  }]
+}
+```
+
+## 🛠️ Développement Local
 
 ```bash
-# Cloner le repo
-git clone https://github.com/Davidb-2107/batch-invoice-processor.git
-cd batch-invoice-processor
-
-# Installer les dépendances
+# Installation
 npm install
 
-# Développement local
+# Démarrage
 npm start
+
+# Build
+npm run build
 ```
 
-### Déploiement Vercel
+## 📝 Changelog
 
-```bash
-# Login
-vercel login
+### v1.3 (2026-01-07)
+- ✅ BC Vendor Lookup via IBAN intégré
+- ✅ Affichage vendorNo, vendorNameBC, canton
+- ✅ Statut automatique (vert) quand fournisseur trouvé
 
-# Configurer la variable d'environnement
-vercel env add BC_TEMPLATE_URL
-# Valeur: https://raw.githubusercontent.com/Davidb-2107/business-central-api-integration/main/bc_template.xlsx
+### v1.2 (2026-01-06)
+- ✅ Swiss QR Payment Code parser
+- ✅ PDF to Image conversion (pdf.js)
+- ✅ OCR via Tesseract
 
-# Déployer
-vercel --prod
-```
+### v1.1 (2026-01-06)
+- ✅ Interface batch processing
+- ✅ Excel generation workflow
 
-## Configuration
+## 📚 Documentation
 
-| Variable | Description |
-|----------|-------------|
-| `REACT_APP_N8N_URL` | URL du webhook n8n (défaut: https://hen8n.com/webhook) |
-| `BC_TEMPLATE_URL` | URL du template Excel BC |
+- [HANDOFF.md](docs/HANDOFF.md) - Documentation technique complète pour reprendre le projet
+- [Architecture détaillée](docs/HANDOFF.md#architecture)
+- [Troubleshooting](docs/HANDOFF.md#troubleshooting)
 
-## Workflow n8n requis
+## 🔗 Liens Utiles
 
-Le workflow `batch-extract` doit être configuré pour:
-1. Recevoir un fichier PDF en POST
-2. Extraire le texte via Tesseract OCR
-3. Parser les données (montant, référence, date échéance)
-4. Lookup RAG pour fournisseur et compte G/L
-5. Retourner les données en JSON synchrone
+- **App** : https://batch-invoice-processor.vercel.app
+- **n8n** : https://hen8n.com
+- **Neon DB** : https://console.neon.tech (project: dawn-frog-92063130)
+- **GitHub** : https://github.com/Davidb-2107/batch-invoice-processor
 
-## Licence
+## 📄 License
 
-MIT
+MIT License - David B. 2026
