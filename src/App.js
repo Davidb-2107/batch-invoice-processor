@@ -143,6 +143,16 @@ function App() {
                 invoiceData.vendorInvoiceNo = ocr.extractedInvoiceNumber || '';
                 invoiceData.description = invoiceData.description || ocr.description || '';
                 
+                // FIX: Map amount from OCR/n8n response
+                if (ocr.amount) {
+                  invoiceData.amount = parseFloat(ocr.amount) || invoiceData.amount;
+                }
+                
+                // Map invoice date if available
+                if (ocr.invoiceDate) {
+                  invoiceData.invoiceDate = ocr.invoiceDate;
+                }
+                
                 // Update vendor name from BC if not from QR
                 if (!invoiceData.vendorName && ocr.vendorName) {
                   invoiceData.vendorName = ocr.vendorName;
