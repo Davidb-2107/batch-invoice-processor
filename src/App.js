@@ -532,7 +532,7 @@ function App() {
 
         {/* Footer */}
         <div className="text-center text-gray-400 text-sm">
-          Batch Invoice Processor v1.3 • QR-code Swiss + OCR + BC Vendor Lookup • Business Central
+          Batch Invoice Processor v1.4 • QR-code Swiss + OCR + BC Vendor Lookup • Business Central
         </div>
       </div>
     </div>
