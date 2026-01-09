@@ -371,5 +371,3 @@ export function extractInvoiceData(qrData, ocrText = '') {
     dimension2: ''
   };
 }
-
-export default { parseSwissQR, extractInvoiceData };
