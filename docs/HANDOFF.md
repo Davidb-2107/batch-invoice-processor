@@ -6,8 +6,8 @@
 
 **Projet** : Application de traitement batch de factures PDF suisses avec QR-code  
 **Objectif** : Automatiser l'import de factures fournisseurs dans Microsoft Dynamics 365 Business Central  
-**Statut** : v1.3 - Fonctionnel avec BC Vendor Lookup  
-**Dernière mise à jour** : 2026-01-07  
+**Statut** : v1.5 - Fonctionnel avec BC Vendor Lookup et génération Excel JavaScript  
+**Dernière mise à jour** : 2026-01-09  
 
 ---
 
@@ -21,6 +21,7 @@
 | Backend/Workflows | n8n | VPS Docker |
 | OCR | Tesseract | VPS Docker |
 | Database | PostgreSQL | Neon (Frankfurt) |
+| Excel Generation | SheetJS (xlsx) | n8n (natif) |
 | Queue | Redis | VPS Docker |
 
 ### URLs & Accès
@@ -102,7 +103,8 @@ Respond to Webhook
     "vendorNameBC": "Steuerverwaltung Thurgau Quellensteuer",
     "canton": "TG",
     "vendorFound": true,
-    "vendorConfidence": "1.0"
+    "vendorConfidence": "1.0",
+    "amount": "41.30"
   }]
 }
 ```
@@ -111,6 +113,69 @@ Respond to Webhook
 - **ID** : `dgeGUvUH6kBenAA2`
 - **Webhook** : `POST https://hen8n.com/webhook/batch-generate-excel`
 - **Statut** : ✅ Actif
+
+**Flux de données (v1.5)** :
+```
+Webhook Generate Excel
+    │
+    ▼
+Generate Excel (Code - JavaScript)
+    │ - Utilise require('xlsx') (SheetJS natif n8n)
+    │ - Nettoie vendorName (supprime \n)
+    │ - Crée 2 sheets : Header + Line
+    │ - Type = "Compte général" (avec accents)
+    │ - Génère buffer Excel
+    │ - Retourne binary via this.helpers.prepareBinaryData()
+    ▼
+Respond with Excel
+    │ - respondWith: binary
+    │ - MIME: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+```
+
+**Payload d'entrée** :
+```json
+{
+  "invoices": [{
+    "documentNo": "INV-001",
+    "vendorNo": "F000050",
+    "vendorName": "Steuerverwaltung Thurgau",
+    "vendorNameBC": "Steuerverwaltung Thurgau Quellensteuer",
+    "postingDate": "2026-01-08",
+    "dueDate": "2026-02-08",
+    "amount": 41.30,
+    "description": "Facture janvier",
+    "dimension1": "TG",
+    "dimension2": "",
+    "glAccount": "6000",
+    "paymentReference": "11 00000 00013 99416..."
+  }]
+}
+```
+
+**Structure Excel générée** :
+
+| Onglet | Lignes | Colonnes |
+|--------|--------|----------|
+| Purchase Invoice Header | Row 1: Table name, Row 3: Headers, Row 4+: Data | 44 colonnes |
+| Purchase Invoice Line | Row 1: Table name, Row 3: Headers, Row 4+: Data | 38 colonnes |
+
+**Colonnes principales Header** :
+- Document Type, No., Buy-from Vendor No., Pay-to Vendor No., Pay-to Name
+- Posting Date, Document Date, Due Date
+- Shortcut Dimension 1/2 Code
+- Gen. Bus. Posting Group = "Compte général"
+- Payment Reference, Vendor Invoice No.
+
+**Colonnes principales Line** :
+- Document Type, Document No., Line No., Buy-from Vendor No.
+- Type = "Compte général"
+- No. (G/L Account), Description
+- Direct Unit Cost, Amount, Line Amount
+- Shortcut Dimension 1/2 Code
+
+**Note technique importante** :
+> Le container n8n utilise Alpine Linux avec un Python "externally managed" (PEP 668).
+> pip install est bloqué. Solution : utiliser SheetJS (`require('xlsx')`) qui est natif dans n8n.
 
 ---
 
@@ -170,6 +235,7 @@ LIMIT 1
 **App.js** - Composant principal
 - State : files, invoices, isProcessing, editingIndex
 - Handlers : handleDrop, extractInvoices, generateExcel
+- Affichage du montant (amount) dans le tableau (v1.4)
 
 **lib/pdf-processor.js** - Conversion PDF
 - Utilise pdf.js pour render PDF → Canvas → JPEG
@@ -190,7 +256,7 @@ LIMIT 1
     ↓
 4. fetch() → n8n /batch-extract
     ↓
-5. Response avec vendorNo, vendorNameBC
+5. Response avec vendorNo, vendorNameBC, amount
     ↓
 6. setInvoices() - update state
     ↓
@@ -222,11 +288,23 @@ LIMIT 1
 
 ### Problème : IBAN non trouvé
 **Cause** : Différence de format (espaces)  
-**Solution** : Nettoyer l'IBAN avec `.replace(/\s/g, '')` avant query
+**Solution** : Nettoyer l'IBAN avec `.replace(/\\s/g, '')` avant query
 
 ### Problème : OCR timeout
 **Cause** : Image trop grande  
 **Solution** : Réduire la résolution du canvas (scale 1.5 au lieu de 2)
+
+### Problème : Excel "format or extension not valid" (RÉSOLU v1.5)
+**Cause** : Python pip bloqué sur Alpine Linux (externally-managed-environment)  
+**Solution** : Réécriture complète en JavaScript avec SheetJS natif
+
+### Problème : "Compte general" sans accents (RÉSOLU v1.5)
+**Cause** : Encodage incorrect  
+**Solution** : Utiliser directement "Compte général" dans le code JavaScript
+
+### Problème : Amount non affiché dans le tableau (RÉSOLU v1.4)
+**Cause** : Mapping manquant dans App.js  
+**Solution** : Ajouter `amount: inv.amount || qrData?.amount` dans le mapping
 
 ---
 
@@ -254,6 +332,24 @@ LIMIT 1
 
 ---
 
+## 📝 Changelog Technique
+
+### v1.5 (2026-01-08)
+- **Excel Generation** : Réécrit en JavaScript pur avec SheetJS
+- **Workflow simplifié** : 3 nodes (Webhook → Code → Respond) au lieu de 5
+- **Fix accents** : "Compte général" correctement encodé
+- **Suppression dépendances** : Plus de Python/openpyxl
+
+### v1.4 (2026-01-08)
+- **Fix amount display** : Ajout mapping amount dans App.js
+- **Commits** : 977891b, 9cec1ef
+
+### v1.3 (2026-01-07)
+- **BC Vendor Lookup** : Intégration PostgreSQL via IBAN
+- **UI enrichie** : vendorNo, vendorNameBC, canton
+
+---
+
 ## 💬 Prompt pour Nouvelle Conversation
 
 Copier ce prompt pour démarrer une nouvelle session avec contexte complet :
@@ -271,13 +367,14 @@ Je travaille sur le projet Batch Invoice Processor pour Business Central.
 1. Frontend React scan QR Swiss Payment Code
 2. Envoie à n8n workflow (ID: U7TyGzvkwHiICE8H)
 3. OCR Tesseract + Vendor Lookup PostgreSQL (bc_vendors_prod)
-4. Retourne vendorNo, vendorNameBC, canton
-5. Génération Excel pour BC Configuration Package
+4. Retourne vendorNo, vendorNameBC, canton, amount
+5. Génération Excel via SheetJS (JavaScript pur) pour BC Configuration Package
 
 **Stack** :
 - React 18, Tailwind, pdf.js, jsQR
 - n8n (Docker VPS), Tesseract OCR
 - PostgreSQL Neon (21 vendors suisses)
+- SheetJS (xlsx) pour génération Excel
 
 **Documentation complète** : https://github.com/Davidb-2107/batch-invoice-processor/blob/main/docs/HANDOFF.md
 
@@ -293,6 +390,7 @@ Je voudrais [DÉCRIS TA DEMANDE ICI]
 - [n8n Documentation](https://docs.n8n.io/)
 - [Neon PostgreSQL](https://neon.tech/docs)
 - [BC Configuration Packages](https://learn.microsoft.com/en-us/dynamics365/business-central/admin-how-to-prepare-a-configuration-package)
+- [SheetJS Documentation](https://docs.sheetjs.com/)
 
 ### Fichiers Clés
 - `src/App.js` - Logique principale React
@@ -308,4 +406,4 @@ Je voudrais [DÉCRIS TA DEMANDE ICI]
 
 ---
 
-*Dernière mise à jour : 2026-01-08*
+*Dernière mise à jour : 2026-01-09*
