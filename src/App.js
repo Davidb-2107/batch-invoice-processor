@@ -103,6 +103,7 @@ function App() {
           glAccount: '',
           dimension1: '',
           dimension2: '',
+          shortcutDimension2Code: '',  // Code raccourci axe 2 (Mandat BC)
           postingDate: new Date().toISOString().split('T')[0],
           dueDate: '',
           paymentReference: result.invoiceData?.paymentReference || '',
@@ -110,7 +111,9 @@ function App() {
           description: result.invoiceData?.message || '',
           confidence: result.hasQR ? 0.9 : 0.3,
           status: result.hasQR ? 'warning' : 'error',
-          modified: false
+          modified: false,
+          mandatFound: false,
+          mandatConfidence: 0
         };
 
         // If we have QR data but need OCR for additional info, send to n8n
@@ -138,6 +141,11 @@ function App() {
                 invoiceData.vendorNo = ocr.vendorNo || '';
                 invoiceData.vendorNameBC = ocr.vendorNameBC || '';
                 invoiceData.canton = ocr.canton || '';
+                
+                // RAG Mandat lookup results - Code raccourci axe 2
+                invoiceData.shortcutDimension2Code = ocr.shortcutDimension2Code || '';
+                invoiceData.mandatFound = ocr.mandatFound || false;
+                invoiceData.mandatConfidence = ocr.mandatConfidence || 0;
                 
                 // OCR extracted data
                 invoiceData.vendorInvoiceNo = ocr.extractedInvoiceNumber || '';
@@ -212,6 +220,7 @@ function App() {
           glAccount: invoice.glAccount,
           dimension1: invoice.dimension1,
           dimension2: invoice.dimension2,
+          shortcutDimension2Code: invoice.shortcutDimension2Code,
           debtorName: invoice.debtorName,
           paymentReference: invoice.paymentReference
         })
@@ -274,14 +283,15 @@ function App() {
 
   // Rendu du statut
   const renderStatus = (invoice) => {
-    const { status, confidence, hasQR } = invoice;
+    const { status, confidence, hasQR, mandatFound } = invoice;
     const icon = hasQR ? <QrCode size={14} className="mr-1" /> : null;
+    const mandatIcon = mandatFound ? <span className="text-purple-500 ml-1" title="Mandat trouvé">◆</span> : null;
     
     switch (status) {
       case 'valid':
-        return <span className="flex items-center text-green-600">{icon}<Check size={16} className="mr-1" /> {Math.round(confidence * 100)}%</span>;
+        return <span className="flex items-center text-green-600">{icon}<Check size={16} className="mr-1" /> {Math.round(confidence * 100)}%{mandatIcon}</span>;
       case 'warning':
-        return <span className="flex items-center text-yellow-600">{icon}<AlertCircle size={16} className="mr-1" /> {Math.round(confidence * 100)}%</span>;
+        return <span className="flex items-center text-yellow-600">{icon}<AlertCircle size={16} className="mr-1" /> {Math.round(confidence * 100)}%{mandatIcon}</span>;
       case 'error':
         return <span className="flex items-center text-red-600"><X size={16} className="mr-1" /> À compléter</span>;
       default:
@@ -409,6 +419,7 @@ function App() {
                     <th className="px-4 py-3 font-medium text-gray-600">Montant</th>
                     <th className="px-4 py-3 font-medium text-gray-600">N° Fourn.</th>
                     <th className="px-4 py-3 font-medium text-gray-600">Compte</th>
+                    <th className="px-4 py-3 font-medium text-gray-600">Axe 2</th>
                     <th className="px-4 py-3 font-medium text-gray-600">Statut</th>
                     <th className="px-4 py-3 font-medium text-gray-600">Actions</th>
                   </tr>
@@ -476,6 +487,21 @@ function App() {
                           <span className="font-mono">{invoice.glAccount || '—'}</span>
                         )}
                       </td>
+                      <td className="px-4 py-3">
+                        {editingIndex === index ? (
+                          <input
+                            type="text"
+                            value={invoice.shortcutDimension2Code}
+                            onChange={(e) => updateInvoice(index, 'shortcutDimension2Code', e.target.value)}
+                            className="border rounded px-2 py-1 w-20"
+                            placeholder="Mandat"
+                          />
+                        ) : (
+                          <span className={`font-mono ${invoice.shortcutDimension2Code ? 'text-purple-600 font-medium' : ''}`}>
+                            {invoice.shortcutDimension2Code || '—'}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">{renderStatus(invoice)}</td>
                       <td className="px-4 py-3">
                         {editingIndex === index ? (
@@ -532,7 +558,7 @@ function App() {
 
         {/* Footer */}
         <div className="text-center text-gray-400 text-sm">
-          Batch Invoice Processor v1.4 • QR-code Swiss + OCR + BC Vendor Lookup • Business Central
+          Batch Invoice Processor v1.5 • QR-code Swiss + OCR + BC Vendor + RAG Mandat Lookup • Business Central
         </div>
       </div>
     </div>
