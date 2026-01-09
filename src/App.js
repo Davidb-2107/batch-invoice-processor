@@ -257,7 +257,7 @@ function App() {
 
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement('a')
       a.href = url;
       a.download = `BC_Package_${new Date().toISOString().split('T')[0]}.xlsx`;
       document.body.appendChild(a);
@@ -281,19 +281,64 @@ function App() {
     setProgress('');
   };
 
-  // Rendu du statut
+  // Rendu du statut avec tooltips
   const renderStatus = (invoice) => {
-    const { status, confidence, hasQR, mandatFound } = invoice;
-    const icon = hasQR ? <QrCode size={14} className="mr-1" /> : null;
-    const mandatIcon = mandatFound ? <span className="text-purple-500 ml-1" title="Mandat trouvé">◆</span> : null;
+    const { status, confidence, hasQR, mandatFound, mandatConfidence } = invoice;
+    const confidencePercent = Math.round(confidence * 100);
+    
+    // Icône QR avec tooltip
+    const qrIcon = hasQR ? (
+      <span title="QR-code Swiss détecté">
+        <QrCode size={14} className="mr-1" />
+      </span>
+    ) : null;
+    
+    // Icône mandat avec tooltip détaillé
+    const mandatIcon = mandatFound ? (
+      <span 
+        className="text-purple-500 ml-1" 
+        title={`Mandat trouvé via RAG (confiance: ${Math.round(mandatConfidence * 100)}%)`}
+      >
+        ◆
+      </span>
+    ) : null;
     
     switch (status) {
       case 'valid':
-        return <span className="flex items-center text-green-600">{icon}<Check size={16} className="mr-1" /> {Math.round(confidence * 100)}%{mandatIcon}</span>;
+        return (
+          <span className="flex items-center text-green-600" title="Fournisseur validé dans Business Central">
+            {qrIcon}
+            <span title="Fournisseur trouvé">
+              <Check size={16} className="mr-1" />
+            </span>
+            <span title={`Confiance de correspondance: ${confidencePercent}%`}>
+              {confidencePercent}%
+            </span>
+            {mandatIcon}
+          </span>
+        );
       case 'warning':
-        return <span className="flex items-center text-yellow-600">{icon}<AlertCircle size={16} className="mr-1" /> {Math.round(confidence * 100)}%{mandatIcon}</span>;
+        return (
+          <span className="flex items-center text-yellow-600" title="En attente de validation fournisseur">
+            {qrIcon}
+            <span title="Fournisseur non trouvé dans BC">
+              <AlertCircle size={16} className="mr-1" />
+            </span>
+            <span title={`Confiance de correspondance: ${confidencePercent}%`}>
+              {confidencePercent}%
+            </span>
+            {mandatIcon}
+          </span>
+        );
       case 'error':
-        return <span className="flex items-center text-red-600"><X size={16} className="mr-1" /> À compléter</span>;
+        return (
+          <span className="flex items-center text-red-600" title="Données manquantes - compléter manuellement">
+            <span title="QR-code non détecté ou illisible">
+              <X size={16} className="mr-1" />
+            </span>
+            À compléter
+          </span>
+        );
       default:
         return null;
     }
@@ -365,6 +410,7 @@ function App() {
                     <button
                       onClick={() => removeFile(index)}
                       className="text-gray-400 hover:text-red-500"
+                      title="Supprimer ce fichier"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -375,6 +421,7 @@ function App() {
                 onClick={extractInvoices}
                 disabled={isProcessing}
                 className="mt-4 bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 flex items-center"
+                title="Lancer l'extraction des données QR et OCR"
               >
                 {isProcessing ? (
                   <>
@@ -412,39 +459,39 @@ function App() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 text-left">
-                    <th className="px-4 py-3 font-medium text-gray-600">N° BC</th>
-                    <th className="px-4 py-3 font-medium text-gray-600">Fournisseur</th>
-                    <th className="px-4 py-3 font-medium text-gray-600">IBAN</th>
-                    <th className="px-4 py-3 font-medium text-gray-600">Référence</th>
-                    <th className="px-4 py-3 font-medium text-gray-600">Montant</th>
-                    <th className="px-4 py-3 font-medium text-gray-600">N° Fourn.</th>
-                    <th className="px-4 py-3 font-medium text-gray-600">Compte</th>
-                    <th className="px-4 py-3 font-medium text-gray-600">Axe 2</th>
-                    <th className="px-4 py-3 font-medium text-gray-600">Statut</th>
-                    <th className="px-4 py-3 font-medium text-gray-600">Actions</th>
+                    <th className="px-4 py-3 font-medium text-gray-600" title="Numéro de document Business Central">N° BC</th>
+                    <th className="px-4 py-3 font-medium text-gray-600" title="Nom du fournisseur (QR + BC)">Fournisseur</th>
+                    <th className="px-4 py-3 font-medium text-gray-600" title="IBAN du fournisseur">IBAN</th>
+                    <th className="px-4 py-3 font-medium text-gray-600" title="Référence de paiement Swiss QR">Référence</th>
+                    <th className="px-4 py-3 font-medium text-gray-600" title="Montant de la facture">Montant</th>
+                    <th className="px-4 py-3 font-medium text-gray-600" title="Numéro fournisseur Business Central">N° Fourn.</th>
+                    <th className="px-4 py-3 font-medium text-gray-600" title="Compte général (G/L Account)">Compte</th>
+                    <th className="px-4 py-3 font-medium text-gray-600" title="Code raccourci axe 2 (Mandat BC)">Axe 2</th>
+                    <th className="px-4 py-3 font-medium text-gray-600" title="Statut de validation">Statut</th>
+                    <th className="px-4 py-3 font-medium text-gray-600" title="Modifier cette ligne">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {invoices.map((invoice, index) => (
-                    <tr key={invoice.id} className={`border-t ${invoice.modified ? 'bg-yellow-50' : ''}`}>
+                    <tr key={invoice.id} className={`border-t ${invoice.modified ? 'bg-yellow-50' : ''}`} title={invoice.modified ? 'Ligne modifiée manuellement' : ''}>
                       <td className="px-4 py-3 font-mono text-xs">{invoice.documentNo}</td>
                       <td className="px-4 py-3">
                         <div className="max-w-xs">
-                          <div className="font-medium truncate">{invoice.vendorName || '—'}</div>
+                          <div className="font-medium truncate" title={invoice.vendorName || 'Non détecté'}>{invoice.vendorName || '—'}</div>
                           {invoice.vendorNameBC && invoice.vendorNameBC !== invoice.vendorName && (
-                            <div className="text-xs text-blue-600 truncate">BC: {invoice.vendorNameBC}</div>
+                            <div className="text-xs text-blue-600 truncate" title={`Nom dans Business Central: ${invoice.vendorNameBC}`}>BC: {invoice.vendorNameBC}</div>
                           )}
                           {invoice.canton && (
-                            <div className="text-xs text-gray-500">Canton: {invoice.canton}</div>
+                            <div className="text-xs text-gray-500" title="Canton suisse">Canton: {invoice.canton}</div>
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs">{invoice.vendorIBAN || '—'}</td>
+                      <td className="px-4 py-3 font-mono text-xs" title={invoice.vendorIBAN || 'IBAN non détecté'}>{invoice.vendorIBAN || '—'}</td>
                       <td className="px-4 py-3">
                         <div className="max-w-xs">
-                          <div className="font-mono text-xs truncate">{invoice.paymentReference || '—'}</div>
+                          <div className="font-mono text-xs truncate" title={invoice.paymentReference || 'Référence non détectée'}>{invoice.paymentReference || '—'}</div>
                           {invoice.referenceType && (
-                            <div className="text-xs text-gray-400">{invoice.referenceType}</div>
+                            <div className="text-xs text-gray-400" title="Type de référence de paiement">{invoice.referenceType}</div>
                           )}
                         </div>
                       </td>
@@ -455,9 +502,10 @@ function App() {
                             value={invoice.amount}
                             onChange={(e) => updateInvoice(index, 'amount', parseFloat(e.target.value))}
                             className="border rounded px-2 py-1 w-24"
+                            title="Modifier le montant"
                           />
                         ) : (
-                          <span>{invoice.amount.toLocaleString('fr-CH')} {invoice.currency}</span>
+                          <span title={`Montant: ${invoice.amount} ${invoice.currency}`}>{invoice.amount.toLocaleString('fr-CH')} {invoice.currency}</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -468,9 +516,13 @@ function App() {
                             onChange={(e) => updateInvoice(index, 'vendorNo', e.target.value)}
                             className="border rounded px-2 py-1 w-20"
                             placeholder="F00XXX"
+                            title="Entrer le numéro fournisseur BC"
                           />
                         ) : (
-                          <span className={`font-mono ${invoice.vendorNo ? 'text-green-600 font-medium' : ''}`}>
+                          <span 
+                            className={`font-mono ${invoice.vendorNo ? 'text-green-600 font-medium' : ''}`}
+                            title={invoice.vendorNo ? 'Fournisseur trouvé dans Business Central' : 'Fournisseur non trouvé - à compléter'}
+                          >
                             {invoice.vendorNo || '—'}
                           </span>
                         )}
@@ -482,9 +534,10 @@ function App() {
                             value={invoice.glAccount}
                             onChange={(e) => updateInvoice(index, 'glAccount', e.target.value)}
                             className="border rounded px-2 py-1 w-20"
+                            title="Entrer le compte général"
                           />
                         ) : (
-                          <span className="font-mono">{invoice.glAccount || '—'}</span>
+                          <span className="font-mono" title={invoice.glAccount ? `Compte général: ${invoice.glAccount}` : 'Compte non défini'}>{invoice.glAccount || '—'}</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -495,9 +548,13 @@ function App() {
                             onChange={(e) => updateInvoice(index, 'shortcutDimension2Code', e.target.value)}
                             className="border rounded px-2 py-1 w-20"
                             placeholder="Mandat"
+                            title="Entrer le code mandat (Axe 2)"
                           />
                         ) : (
-                          <span className={`font-mono ${invoice.shortcutDimension2Code ? 'text-purple-600 font-medium' : ''}`}>
+                          <span 
+                            className={`font-mono ${invoice.shortcutDimension2Code ? 'text-purple-600 font-medium' : ''}`}
+                            title={invoice.shortcutDimension2Code ? `Mandat trouvé via RAG: ${invoice.shortcutDimension2Code}` : 'Mandat non trouvé'}
+                          >
                             {invoice.shortcutDimension2Code || '—'}
                           </span>
                         )}
@@ -508,6 +565,7 @@ function App() {
                           <button
                             onClick={() => setEditingIndex(null)}
                             className="text-green-600 hover:text-green-800"
+                            title="Valider les modifications"
                           >
                             <Check size={18} />
                           </button>
@@ -515,6 +573,7 @@ function App() {
                           <button
                             onClick={() => setEditingIndex(index)}
                             className="text-gray-400 hover:text-blue-600"
+                            title="Modifier cette ligne"
                           >
                             <Edit2 size={18} />
                           </button>
@@ -532,6 +591,7 @@ function App() {
                 onClick={generateExcel}
                 disabled={isGenerating}
                 className="bg-green-600 text-white px-6 py-2 rounded-md hover:bg-green-700 disabled:bg-gray-400 flex items-center"
+                title="Générer le fichier Excel pour import dans Business Central"
               >
                 {isGenerating ? (
                   <>
@@ -548,6 +608,7 @@ function App() {
               <button
                 onClick={clearAll}
                 className="bg-gray-200 text-gray-700 px-6 py-2 rounded-md hover:bg-gray-300 flex items-center"
+                title="Effacer tous les fichiers et données"
               >
                 <Trash2 className="mr-2" size={18} />
                 Effacer tout
