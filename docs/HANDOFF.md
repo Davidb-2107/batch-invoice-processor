@@ -6,7 +6,7 @@
 
 **Projet** : Application de traitement batch de factures PDF suisses avec QR-code  
 **Objectif** : Automatiser l'import de factures fournisseurs dans Microsoft Dynamics 365 Business Central  
-**Statut** : v1.5 - Fonctionnel avec BC Vendor Lookup, RAG Mandat Lookup et génération Excel JavaScript  
+**Statut** : v1.6 - Fonctionnel avec BC Vendor Lookup, RAG Mandat Lookup amélioré et génération Excel JavaScript  
 **Dernière mise à jour** : 2026-01-09  
 
 ---
@@ -69,7 +69,8 @@ Vendor Lookup (BC Prod) (PostgreSQL)
     │ - Credentials: Neon Invoice-RAG
     ▼
 RAG Lookup Mandat (PostgreSQL)
-    │ - Lookup invoice_vendor_mappings par debtorName/IBAN
+    │ - Lookup invoice_vendor_mappings par debtorName (bidirectionnel)
+    │ - Validation input (min 3 caractères)
     │ - Retourne mandat_bc (Code raccourci axe 2)
     ▼
 Merge Vendor Data (Code)
@@ -281,21 +282,45 @@ CREATE TABLE invoice_vendor_mappings (
 **Données actuelles** : Mappings debtorName → mandat_bc
 - Exemple : `debtor_name="David Esteves Beles"` → `mandat_bc="93622"`, `confidence=0.95`
 
-**Query RAG Lookup Mandat** :
+**Query RAG Lookup Mandat (v1.6)** :
 ```sql
 SELECT mandat_bc, sous_mandat_bc, confidence, usage_count
 FROM invoice_vendor_mappings m
 JOIN bc_companies c ON m.company_id = c.id
 WHERE c.bc_company_id = $1
+  AND COALESCE(NULLIF(TRIM($2), ''), NULL) IS NOT NULL  -- Ignore si vide
+  AND LENGTH(TRIM($2)) >= 3                              -- Minimum 3 caractères
   AND (
-    m.debtor_name ILIKE '%' || $2 || '%'
-    OR m.iban = $3
+    m.debtor_name ILIKE '%' || TRIM($2) || '%'
+    OR TRIM($2) ILIKE '%' || m.debtor_name || '%'
   )
 ORDER BY confidence DESC, usage_count DESC
 LIMIT 1
 ```
 
-**Paramètres** : `[bc_company_id, debtorName, vendorIBAN]`
+**Paramètres** : `[bc_company_id, debtorName]`
+
+#### Logique de la requête RAG Lookup Mandat
+
+| Élément | Description |
+|---------|-------------|
+| `COALESCE(NULLIF(TRIM($2), ''), NULL) IS NOT NULL` | Ignore la recherche si `debtorName` est vide ou ne contient que des espaces |
+| `LENGTH(TRIM($2)) >= 3` | Exige un minimum de 3 caractères pour éviter les faux positifs |
+| `m.debtor_name ILIKE '%' || TRIM($2) || '%'` | Match si le terme de recherche est contenu dans `debtor_name` |
+| `TRIM($2) ILIKE '%' || m.debtor_name || '%'` | Match si `debtor_name` est contenu dans le terme de recherche (recherche bidirectionnelle) |
+| `TRIM($2)` | Nettoie les espaces en début/fin du paramètre |
+
+**Avantages de la recherche bidirectionnelle** :
+- Trouve "David Beles" dans "David Esteves Beles" (partiel → complet)
+- Trouve "David Esteves Beles SA" quand `debtor_name` = "David Esteves Beles" (complet → partiel)
+- Robuste face aux variations de noms entre factures
+
+**Changements v1.6 vs v1.5** :
+- ❌ Suppression de la recherche par IBAN (maintenant uniquement par `debtorName`)
+- ✅ Ajout validation input vide
+- ✅ Ajout longueur minimale 3 caractères
+- ✅ Recherche bidirectionnelle ILIKE
+- ✅ TRIM() systématique sur le paramètre
 
 ---
 
@@ -414,12 +439,17 @@ LIMIT 1
 **Cause** : Pas de mapping dans invoice_vendor_mappings pour le debtorName  
 **Solution** : Ajouter un enregistrement dans la table avec le debtor_name et mandat_bc correspondants
 
+### Problème : RAG Lookup retourne des faux positifs (RÉSOLU v1.6)
+**Cause** : Recherche trop permissive avec des termes courts ou vides  
+**Solution** : Ajout validation input (min 3 caractères, ignore si vide) + recherche bidirectionnelle
+
 ---
 
 ## 🚀 Prochaines Étapes (Roadmap)
 
 ### Phase 4 : RAG Learning Amélioré
 - [x] ~~RAG Lookup Mandat (Code raccourci axe 2)~~ ✅ v1.5
+- [x] ~~Validation input et recherche bidirectionnelle~~ ✅ v1.6
 - [ ] Auto-apprentissage : augmenter confidence après validation utilisateur
 - [ ] Apprentissage association vendorName → glAccount
 - [ ] Interface feedback utilisateur pour corrections
@@ -443,6 +473,15 @@ LIMIT 1
 ---
 
 ## 📝 Changelog Technique
+
+### v1.6 (2026-01-09)
+- **RAG Lookup Mandat amélioré** : Nouvelle requête SQL avec validation input
+  - Ignore les recherches si debtorName est vide
+  - Exige minimum 3 caractères
+  - Recherche bidirectionnelle (terme dans DB OU DB dans terme)
+  - TRIM() systématique pour nettoyer les espaces
+- **Suppression recherche IBAN** : Le RAG Mandat utilise maintenant uniquement debtorName
+- **Documentation** : Mise à jour HANDOFF.md avec explication détaillée de la logique
 
 ### v1.5 (2026-01-09)
 - **RAG Lookup Mandat** : Nouveau nœud PostgreSQL pour lookup `invoice_vendor_mappings`
@@ -486,6 +525,7 @@ Je travaille sur le projet Batch Invoice Processor pour Business Central.
 2. Envoie à n8n workflow (ID: U7TyGzvkwHiICE8H)
 3. OCR Tesseract + Vendor Lookup PostgreSQL (bc_vendors_prod)
 4. RAG Lookup Mandat (invoice_vendor_mappings) → shortcutDimension2Code
+   - Recherche bidirectionnelle par debtorName (min 3 chars)
 5. Retourne vendorNo, vendorNameBC, canton, amount, shortcutDimension2Code
 6. Génération Excel via SheetJS (JavaScript pur) pour BC Configuration Package
 
