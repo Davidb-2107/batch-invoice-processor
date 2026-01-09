@@ -337,21 +337,31 @@ LIMIT 1
 
 ### Colonnes du tableau des factures (v1.5)
 
-| Colonne | Source | Éditable |
-|---------|--------|----------|
-| N° BC | documentNo | Non |
-| Fournisseur | vendorName + vendorNameBC | Non |
-| IBAN | vendorIBAN | Non |
-| Référence | paymentReference | Non |
-| Montant | amount | Oui |
-| N° Fourn. | vendorNo | Oui |
-| Compte | glAccount | Oui |
-| **Axe 2** | shortcutDimension2Code | Oui |
-| Statut | confidence + mandatFound | Non |
+| Colonne | Source | Éditable | Tooltip |
+|---------|--------|----------|---------|
+| N° BC | documentNo | Non | "Numéro de document Business Central" |
+| Fournisseur | vendorName + vendorNameBC | Non | "Nom du fournisseur (QR + BC)" |
+| IBAN | vendorIBAN | Non | "IBAN du fournisseur" |
+| Référence | paymentReference | Non | "Référence de paiement Swiss QR" |
+| Montant | amount | Oui | "Montant de la facture" |
+| N° Fourn. | vendorNo | Oui | "Numéro fournisseur Business Central" |
+| Compte | glAccount | Oui | "Compte général (G/L Account)" |
+| **Axe 2** | shortcutDimension2Code | Oui | "Code raccourci axe 2 (Mandat BC)" |
+| Statut | confidence + mandatFound | Non | "Statut de validation" |
 
-**Indicateurs visuels** :
-- Mandat trouvé : Affichage en **violet** + icône ◆ dans le statut
-- Vendor trouvé : Affichage en **vert**
+### Indicateurs visuels et tooltips
+
+| Indicateur | Couleur | Tooltip au survol |
+|------------|---------|-------------------|
+| 🔲 QrCode | — | "QR-code Swiss détecté" |
+| ✓ Check | Vert | "Fournisseur trouvé" |
+| ⚠ AlertCircle | Jaune | "Fournisseur non trouvé dans BC" |
+| ✗ X | Rouge | "QR-code non détecté ou illisible" |
+| % Confiance | — | "Confiance de correspondance: XX%" |
+| ◆ Mandat | Violet | "Mandat trouvé via RAG (confiance: XX%)" |
+| vendorNo | Vert | "Fournisseur trouvé dans Business Central" |
+| Axe 2 | Violet | "Mandat trouvé via RAG: XXXXX" |
+| Ligne jaune | Jaune | "Ligne modifiée manuellement" |
 
 ---
 
@@ -425,6 +435,7 @@ LIMIT 1
 - [ ] Logs centralisés
 
 ### Améliorations UI
+- [x] ~~Tooltips explicatifs sur tous les indicateurs~~ ✅ v1.5
 - [ ] Preview PDF dans l'interface
 - [ ] Historique des batches
 - [ ] Export CSV en plus d'Excel
@@ -438,6 +449,7 @@ LIMIT 1
 - **shortcutDimension2Code** : Ajout du champ "Code raccourci axe 2" dans le workflow et le frontend
 - **Frontend** : Nouvelle colonne "Axe 2" avec affichage violet et édition
 - **Indicateur mandat** : Icône ◆ dans le statut quand mandat trouvé
+- **Tooltips UX** : Ajout de tooltips explicatifs sur tous les indicateurs, colonnes et boutons
 - **Fix binary data flow** : Correction du flux de données entre Webhook et Split Invoices
 
 ### v1.5 (2026-01-08)
