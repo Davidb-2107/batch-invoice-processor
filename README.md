@@ -2,7 +2,7 @@
 
 Application web pour le traitement en lot de factures PDF suisses avec QR-code, extraction OCR et génération de packages Excel pour Microsoft Dynamics 365 Business Central.
 
-![Version](https://img.shields.io/badge/version-1.3-blue)
+![Version](https://img.shields.io/badge/version-1.5-blue)
 ![React](https://img.shields.io/badge/React-18-61dafb)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -11,7 +11,7 @@ Application web pour le traitement en lot de factures PDF suisses avec QR-code, 
 - **📷 Scan QR Swiss Payment Code** - Extraction automatique des données de paiement (IBAN, référence, montant)
 - **🔍 OCR Tesseract** - Reconnaissance optique pour données complémentaires
 - **🏢 BC Vendor Lookup** - Recherche automatique du fournisseur dans Business Central via IBAN
-- **📊 Export Excel** - Génération de packages d'import pour BC Configuration Packages
+- **📊 Export Excel** - Génération de packages d'import pour BC Configuration Packages (JavaScript pur)
 - **🧠 RAG Learning** - Apprentissage des associations fournisseur/compte pour amélioration continue
 
 ## 🏗️ Architecture
@@ -27,7 +27,7 @@ Application web pour le traitement en lot de factures PDF suisses avec QR-code, 
 │                         BACKEND (n8n VPS)                        │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
 │  │ Batch Extract│  │Generate Excel│  │ RAG Learning │          │
-│  │   Workflow   │  │   Workflow   │  │   Workflow   │          │
+│  │   Workflow   │  │  (SheetJS)   │  │   Workflow   │          │
 │  └──────┬───────┘  └──────────────┘  └──────────────┘          │
 │         │                                                        │
 │         ▼                                                        │
@@ -99,25 +99,22 @@ REACT_APP_RAG_ENDPOINT=/rag-learning
 3. **Vérifier/Corriger** - Éditer les champs si nécessaire
 4. **Générer Excel** - Télécharger le package pour import dans BC
 
-## 🔄 Workflow n8n - Batch Extract
+## 🔄 Workflows n8n
 
+### Batch Extract - Invoice Processor
 ```
 Webhook → Split Invoices → Tesseract OCR → Extract Invoice Data
     → Vendor Lookup (PostgreSQL) → Merge Vendor Data → Aggregate Results → Respond
 ```
 
-### Vendor Lookup Query
-```sql
-SELECT vendor_no, name, canton, iban, 1.0 as confidence
-FROM bc_vendors_prod
-WHERE iban = $1
-UNION ALL
-SELECT vendor_no, name, canton, iban, 0.8 as confidence
-FROM bc_vendors_prod
-WHERE LOWER(search_name) LIKE LOWER($2)
-ORDER BY confidence DESC
-LIMIT 1
+### Batch Generate Excel - BC Package
 ```
+Webhook → Generate Excel (JavaScript/SheetJS) → Respond with Binary
+```
+
+Génère un fichier Excel avec 2 onglets :
+- **Purchase Invoice Header** : En-têtes de factures (44 colonnes)
+- **Purchase Invoice Line** : Lignes de factures (38 colonnes)
 
 ## 📊 Format de Réponse API
 
@@ -155,6 +152,16 @@ npm run build
 ```
 
 ## 📝 Changelog
+
+### v1.5 (2026-01-08)
+- ✅ Génération Excel réécrite en JavaScript pur (SheetJS)
+- ✅ Suppression dépendance Python/openpyxl (problèmes Alpine Linux)
+- ✅ Correction "Compte général" avec accents français
+- ✅ Workflow simplifié : 3 nodes au lieu de 5
+
+### v1.4 (2026-01-08)
+- ✅ Correction affichage du montant dans le tableau des factures
+- ✅ Mapping amount depuis la réponse OCR n8n
 
 ### v1.3 (2026-01-07)
 - ✅ BC Vendor Lookup via IBAN intégré
