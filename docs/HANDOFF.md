@@ -6,7 +6,7 @@
 
 **Projet** : Application de traitement batch de factures PDF suisses avec QR-code  
 **Objectif** : Automatiser l'import de factures fournisseurs dans Microsoft Dynamics 365 Business Central  
-**Statut** : v1.5 - Fonctionnel avec BC Vendor Lookup et génération Excel JavaScript  
+**Statut** : v1.5 - Fonctionnel avec BC Vendor Lookup, RAG Mandat Lookup et génération Excel JavaScript  
 **Dernière mise à jour** : 2026-01-09  
 
 ---
@@ -47,6 +47,10 @@
 Webhook Batch Extract
     │
     ▼
+Get Config (PostgreSQL)
+    │ - Récupère bc_company_id depuis bc_companies
+    │
+    ▼
 Split Invoices (Code)
     │ - Extrait qrData.vendorIBAN
     │ - Prépare binary pour OCR
@@ -58,19 +62,23 @@ Tesseract OCR (HTTP Request)
 Extract Invoice Data (Code)
     │ - Parse HTML response
     │ - Regex extraction (date, amount, etc.)
-    │ - Passe vendorIBAN, vendorName
+    │ - Passe vendorIBAN, vendorName, debtorName
     ▼
 Vendor Lookup (BC Prod) (PostgreSQL)
     │ - Query UNION (IBAN exact + name fuzzy)
-    │ - Credentials: Neon Invoice-RAG (LPLhfJ2K18rp4Geu)
+    │ - Credentials: Neon Invoice-RAG
+    ▼
+RAG Lookup Mandat (PostgreSQL)
+    │ - Lookup invoice_vendor_mappings par debtorName/IBAN
+    │ - Retourne mandat_bc (Code raccourci axe 2)
     ▼
 Merge Vendor Data (Code)
-    │ - Combine OCR + vendor lookup
-    │ - Ajoute vendorNo, vendorNameBC, canton
+    │ - Combine OCR + vendor lookup + RAG mandat
+    │ - Ajoute vendorNo, vendorNameBC, canton, mandatBC
     ▼
 Aggregate Results (Code)
     │ - Sort par index
-    │ - Format final JSON
+    │ - Format final JSON avec shortcutDimension2Code
     ▼
 Respond to Webhook
 ```
@@ -86,7 +94,8 @@ Respond to Webhook
       "vendorName": "Steuerverwaltung Thurgau",
       "vendorIBAN": "CH9830000010850000725",
       "amount": 41.30,
-      "paymentReference": "11 00000 00013 99416..."
+      "paymentReference": "11 00000 00013 99416...",
+      "debtorName": "David Esteves Beles"
     }
   }]
 }
@@ -104,7 +113,11 @@ Respond to Webhook
     "canton": "TG",
     "vendorFound": true,
     "vendorConfidence": "1.0",
-    "amount": "41.30"
+    "amount": "41.30",
+    "shortcutDimension2Code": "93622",
+    "sousMandatBC": "",
+    "mandatFound": true,
+    "mandatConfidence": 0.95
   }]
 }
 ```
@@ -124,6 +137,7 @@ Generate Excel (Code - JavaScript)
     │ - Nettoie vendorName (supprime \n)
     │ - Crée 2 sheets : Header + Line
     │ - Type = "Compte général" (avec accents)
+    │ - Mappe shortcutDimension2Code vers "Shortcut Dimension 2 Code"
     │ - Génère buffer Excel
     │ - Retourne binary via this.helpers.prepareBinaryData()
     ▼
@@ -145,7 +159,7 @@ Respond with Excel
     "amount": 41.30,
     "description": "Facture janvier",
     "dimension1": "TG",
-    "dimension2": "",
+    "shortcutDimension2Code": "93622",
     "glAccount": "6000",
     "paymentReference": "11 00000 00013 99416..."
   }]
@@ -162,7 +176,8 @@ Respond with Excel
 **Colonnes principales Header** :
 - Document Type, No., Buy-from Vendor No., Pay-to Vendor No., Pay-to Name
 - Posting Date, Document Date, Due Date
-- Shortcut Dimension 1/2 Code
+- Shortcut Dimension 1 Code (Canton)
+- **Shortcut Dimension 2 Code (Mandat)** ← Nouveau v1.5
 - Gen. Bus. Posting Group = "Compte général"
 - Payment Reference, Vendor Invoice No.
 
@@ -171,11 +186,17 @@ Respond with Excel
 - Type = "Compte général"
 - No. (G/L Account), Description
 - Direct Unit Cost, Amount, Line Amount
-- Shortcut Dimension 1/2 Code
+- Shortcut Dimension 1 Code (Canton)
+- **Shortcut Dimension 2 Code (Mandat)** ← Nouveau v1.5
 
 **Note technique importante** :
 > Le container n8n utilise Alpine Linux avec un Python "externally managed" (PEP 668).
 > pip install est bloqué. Solution : utiliser SheetJS (`require('xlsx')`) qui est natif dans n8n.
+
+### 3. RAG Lookup Mandat (Workflow de référence)
+- **ID** : `I4jxZ9oILeuIMrYS`
+- **Usage** : Référence pour la logique RAG mandat
+- **Statut** : ✅ Actif (référence)
 
 ---
 
@@ -226,16 +247,67 @@ ORDER BY confidence DESC
 LIMIT 1
 ```
 
+### Table : bc_companies
+
+```sql
+CREATE TABLE bc_companies (
+    id SERIAL PRIMARY KEY,
+    bc_company_id UUID NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+**Données actuelles** : 1 company (CRONUS CH)
+- `bc_company_id`: `207217f3-fdb9-f011-af69-6045bde99e23`
+
+### Table : invoice_vendor_mappings (RAG Mandat)
+
+```sql
+CREATE TABLE invoice_vendor_mappings (
+    id SERIAL PRIMARY KEY,
+    company_id INTEGER REFERENCES bc_companies(id),
+    debtor_name VARCHAR(255),
+    iban VARCHAR(34),
+    mandat_bc VARCHAR(50),           -- Code raccourci axe 2
+    sous_mandat_bc VARCHAR(50),      -- Sous-mandat optionnel
+    confidence DECIMAL(3,2) DEFAULT 0.50,
+    usage_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+**Données actuelles** : Mappings debtorName → mandat_bc
+- Exemple : `debtor_name="David Esteves Beles"` → `mandat_bc="93622"`, `confidence=0.95`
+
+**Query RAG Lookup Mandat** :
+```sql
+SELECT mandat_bc, sous_mandat_bc, confidence, usage_count
+FROM invoice_vendor_mappings m
+JOIN bc_companies c ON m.company_id = c.id
+WHERE c.bc_company_id = $1
+  AND (
+    m.debtor_name ILIKE '%' || $2 || '%'
+    OR m.iban = $3
+  )
+ORDER BY confidence DESC, usage_count DESC
+LIMIT 1
+```
+
+**Paramètres** : `[bc_company_id, debtorName, vendorIBAN]`
+
 ---
 
 ## 📱 Frontend React
 
 ### Composants Principaux
 
-**App.js** - Composant principal
+**App.js** - Composant principal (v1.5)
 - State : files, invoices, isProcessing, editingIndex
 - Handlers : handleDrop, extractInvoices, generateExcel
-- Affichage du montant (amount) dans le tableau (v1.4)
+- **Nouveau** : Champ `shortcutDimension2Code` (Axe 2 / Mandat)
+- **Nouveau** : Indicateurs `mandatFound`, `mandatConfidence`
 
 **lib/pdf-processor.js** - Conversion PDF
 - Utilise pdf.js pour render PDF → Canvas → JPEG
@@ -243,7 +315,7 @@ LIMIT 1
 
 **lib/qr-parser.js** - Parser Swiss QR
 - Parse le format Swiss Payment Code (SPC)
-- Extrait : IBAN, vendorName, amount, reference
+- Extrait : IBAN, vendorName, amount, reference, debtorName
 
 ### Flux de données Frontend
 
@@ -252,16 +324,34 @@ LIMIT 1
     ↓
 2. PDFProcessor.processPDF()
     ↓ pdf.js render
-3. QRParser.parse() - extrait données QR
+3. QRParser.parse() - extrait données QR (incl. debtorName)
     ↓
 4. fetch() → n8n /batch-extract
     ↓
-5. Response avec vendorNo, vendorNameBC, amount
+5. Response avec vendorNo, vendorNameBC, amount, shortcutDimension2Code
     ↓
 6. setInvoices() - update state
     ↓
-7. Render table avec données enrichies
+7. Render table avec données enrichies (colonne "Axe 2")
 ```
+
+### Colonnes du tableau des factures (v1.5)
+
+| Colonne | Source | Éditable |
+|---------|--------|----------|
+| N° BC | documentNo | Non |
+| Fournisseur | vendorName + vendorNameBC | Non |
+| IBAN | vendorIBAN | Non |
+| Référence | paymentReference | Non |
+| Montant | amount | Oui |
+| N° Fourn. | vendorNo | Oui |
+| Compte | glAccount | Oui |
+| **Axe 2** | shortcutDimension2Code | Oui |
+| Statut | confidence + mandatFound | Non |
+
+**Indicateurs visuels** :
+- Mandat trouvé : Affichage en **violet** + icône ◆ dans le statut
+- Vendor trouvé : Affichage en **vert**
 
 ---
 
@@ -276,7 +366,7 @@ LIMIT 1
 ### n8n Credentials
 | Nom | Type | ID | Usage |
 |-----|------|-----|-------|
-| Neon Invoice-RAG | PostgreSQL | LPLhfJ2K18rp4Geu | Vendor Lookup |
+| Neon Invoice-RAG | PostgreSQL | LPLhfJ2K18rp4Geu | Vendor Lookup + RAG Mandat |
 
 ---
 
@@ -306,14 +396,23 @@ LIMIT 1
 **Cause** : Mapping manquant dans App.js  
 **Solution** : Ajouter `amount: inv.amount || qrData?.amount` dans le mapping
 
+### Problème : Binary file not found at Tesseract OCR (RÉSOLU v1.5)
+**Cause** : Get Config node inséré entre Webhook et Split Invoices cassait le flux de données binaires  
+**Solution** : Modifier Split Invoices pour accéder aux données Webhook directement via `$('Webhook Batch Extract').first().json`
+
+### Problème : shortcutDimension2Code vide
+**Cause** : Pas de mapping dans invoice_vendor_mappings pour le debtorName  
+**Solution** : Ajouter un enregistrement dans la table avec le debtor_name et mandat_bc correspondants
+
 ---
 
 ## 🚀 Prochaines Étapes (Roadmap)
 
 ### Phase 4 : RAG Learning Amélioré
+- [x] ~~RAG Lookup Mandat (Code raccourci axe 2)~~ ✅ v1.5
+- [ ] Auto-apprentissage : augmenter confidence après validation utilisateur
 - [ ] Apprentissage association vendorName → glAccount
-- [ ] Apprentissage dimension1/dimension2 par fournisseur
-- [ ] Interface feedback utilisateur
+- [ ] Interface feedback utilisateur pour corrections
 
 ### Phase 5 : Multi-tenant
 - [ ] Support plusieurs environnements BC
@@ -333,6 +432,13 @@ LIMIT 1
 ---
 
 ## 📝 Changelog Technique
+
+### v1.5 (2026-01-09)
+- **RAG Lookup Mandat** : Nouveau nœud PostgreSQL pour lookup `invoice_vendor_mappings`
+- **shortcutDimension2Code** : Ajout du champ "Code raccourci axe 2" dans le workflow et le frontend
+- **Frontend** : Nouvelle colonne "Axe 2" avec affichage violet et édition
+- **Indicateur mandat** : Icône ◆ dans le statut quand mandat trouvé
+- **Fix binary data flow** : Correction du flux de données entre Webhook et Split Invoices
 
 ### v1.5 (2026-01-08)
 - **Excel Generation** : Réécrit en JavaScript pur avec SheetJS
@@ -364,17 +470,23 @@ Je travaille sur le projet Batch Invoice Processor pour Business Central.
 - GitHub : https://github.com/Davidb-2107/batch-invoice-processor
 
 **Architecture actuelle** :
-1. Frontend React scan QR Swiss Payment Code
+1. Frontend React scan QR Swiss Payment Code (incl. debtorName)
 2. Envoie à n8n workflow (ID: U7TyGzvkwHiICE8H)
 3. OCR Tesseract + Vendor Lookup PostgreSQL (bc_vendors_prod)
-4. Retourne vendorNo, vendorNameBC, canton, amount
-5. Génération Excel via SheetJS (JavaScript pur) pour BC Configuration Package
+4. RAG Lookup Mandat (invoice_vendor_mappings) → shortcutDimension2Code
+5. Retourne vendorNo, vendorNameBC, canton, amount, shortcutDimension2Code
+6. Génération Excel via SheetJS (JavaScript pur) pour BC Configuration Package
 
 **Stack** :
 - React 18, Tailwind, pdf.js, jsQR
 - n8n (Docker VPS), Tesseract OCR
-- PostgreSQL Neon (21 vendors suisses)
+- PostgreSQL Neon (21 vendors suisses + mappings mandat)
 - SheetJS (xlsx) pour génération Excel
+
+**Tables principales** :
+- bc_vendors_prod : Fournisseurs BC (vendor_no, iban, canton)
+- bc_companies : Companies BC (bc_company_id)
+- invoice_vendor_mappings : RAG Mandat (debtor_name → mandat_bc)
 
 **Documentation complète** : https://github.com/Davidb-2107/batch-invoice-processor/blob/main/docs/HANDOFF.md
 
