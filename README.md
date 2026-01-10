@@ -2,13 +2,14 @@
 
 Application web pour le traitement en lot de factures PDF suisses avec QR-code, extraction OCR et génération de packages Excel pour Microsoft Dynamics 365 Business Central.
 
-![Version](https://img.shields.io/badge/version-1.5-blue)
+![Version](https://img.shields.io/badge/version-1.6-blue)
 ![React](https://img.shields.io/badge/React-18-61dafb)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## 🎯 Fonctionnalités
 
 - **📷 Scan QR Swiss Payment Code** - Extraction automatique des données de paiement (IBAN, référence, montant)
+- **📋 Format Swico** - Parsing des billing information (`//S1/10/invoiceNo/11/date...`)
 - **🔍 OCR Tesseract** - Reconnaissance optique pour données complémentaires
 - **🏢 BC Vendor Lookup** - Recherche automatique du fournisseur dans Business Central via IBAN
 - **📊 Export Excel** - Génération de packages d'import pour BC Configuration Packages (JavaScript pur)
@@ -64,7 +65,7 @@ batch-invoice-processor/
 │   ├── index.js               # Point d'entrée
 │   └── lib/
 │       ├── pdf-processor.js   # Conversion PDF → Image
-│       └── qr-parser.js       # Parser Swiss QR Payment Code
+│       └── qr-parser.js       # ⚠️ AUTO-GÉNÉRÉ - Ne pas modifier !
 ├── api/                       # Vercel Serverless Functions (legacy)
 ├── public/
 │   └── index.html
@@ -74,6 +75,40 @@ batch-invoice-processor/
 ├── vercel.json
 └── README.md
 ```
+
+---
+
+## 🔄 Synchronisation Automatique du Parser QR
+
+> ⚠️ **IMPORTANT** : Le fichier `src/lib/qr-parser.js` est **auto-généré** par une GitHub Action depuis [QR-reader](https://github.com/Davidb-2107/QR-reader). **Ne jamais le modifier directement !**
+
+### Source unique
+
+Le parser Swiss QR est maintenu dans **QR-reader** (`client/src/lib/qr-scanner.ts`) et synchronisé automatiquement vers ce projet.
+
+```
+QR-reader                              batch-invoice-processor
+┌─────────────────────┐                ┌─────────────────────┐
+│ client/src/lib/     │    GitHub      │ src/lib/            │
+│ qr-scanner.ts       │ ──Action──►    │ qr-parser.js        │
+│ (TypeScript)        │   (auto)       │ (JavaScript)        │
+│                     │                │                     │
+│ ⚡ SOURCE UNIQUE    │                │ ⛔ AUTO-GÉNÉRÉ      │
+└─────────────────────┘                └─────────────────────┘
+```
+
+### Pour modifier le parser
+
+1. Modifier `client/src/lib/qr-scanner.ts` dans **QR-reader**
+2. Push sur `main`
+3. La GitHub Action synchronise automatiquement vers ce projet
+4. Vercel redéploie automatiquement
+
+### Workflow GitHub Action
+
+Voir : [QR-reader/.github/workflows/sync-qr-parser.yml](https://github.com/Davidb-2107/QR-reader/blob/main/.github/workflows/sync-qr-parser.yml)
+
+---
 
 ## 🔧 Configuration
 
@@ -153,6 +188,12 @@ npm run build
 
 ## 📝 Changelog
 
+### v1.6 (2026-01-10)
+- ✅ **Parser QR synchronisé automatiquement depuis QR-reader**
+- ✅ Support complet du format Swico (//S1/10/invoiceNo/11/date...)
+- ✅ Extraction des champs : invoiceNumber, invoiceDate, vatNumber
+- ✅ Conversion date Swico YYMMDD → YYYY-MM-DD
+
 ### v1.5 (2026-01-08)
 - ✅ Génération Excel réécrite en JavaScript pur (SheetJS)
 - ✅ Suppression dépendance Python/openpyxl (problèmes Alpine Linux)
@@ -186,6 +227,7 @@ npm run build
 ## 🔗 Liens Utiles
 
 - **App** : https://batch-invoice-processor.vercel.app
+- **QR-reader (source du parser)** : https://github.com/Davidb-2107/QR-reader
 - **n8n** : https://hen8n.com
 - **Neon DB** : https://console.neon.tech (project: dawn-frog-92063130)
 - **GitHub** : https://github.com/Davidb-2107/batch-invoice-processor
