@@ -6,7 +6,7 @@
  * Key improvements:
  * - Handles both address types: S (structured) and K (combined)
  * - Properly builds full addresses from parts
- * - Extracts all available fields including billing info
+ * - Extracts all available fields including Swico billing info
  */
 
 export function parseSwissQR(rawData) {
@@ -36,7 +36,8 @@ export function parseSwissQR(rawData) {
       qrType: lines[0],           // SPC
       version: lines[1],          // 0200
       coding: lines[2],           // 1 = UTF-8
-      rawText: rawData
+      rawText: rawData,
+      qrCodeVersion: lines[1]
     };
 
     // Line 3: IBAN
@@ -67,11 +68,13 @@ export function parseSwissQR(rawData) {
       // Combined address (address in 2 lines)
       if (lines[6]) result.creditorAddressLine1 = lines[6];
       if (lines[7]) result.creditorAddressLine2 = lines[7];
-      // Lines 8-9 may be empty for K type, but we try anyway
       if (lines[8]) result.creditorPostalCode = lines[8];
       if (lines[9]) result.creditorCity = lines[9];
       if (lines[10]) result.creditorCountry = lines[10];
     }
+
+    // Store country
+    result.country = lines[10] || 'CH';
 
     // Build full creditor address for display
     result.creditorAddress = buildAddress(
@@ -79,7 +82,8 @@ export function parseSwissQR(rawData) {
       result.creditorBuildingNumber || result.creditorAddressLine2,
       result.creditorPostalCode,
       result.creditorCity,
-      result.creditorCountry
+      result.creditorCountry,
+      creditorAddressType
     );
     result.vendorAddress = result.creditorAddress;
 
@@ -140,7 +144,8 @@ export function parseSwissQR(rawData) {
         result.debtorBuildingNumber || result.debtorAddressLine2,
         result.debtorPostalCode,
         result.debtorCity,
-        result.debtorCountry
+        result.debtorCountry,
+        debtorAddressType
       );
     }
 
@@ -194,7 +199,10 @@ export function parseSwissQR(rawData) {
       amount: result.amount,
       currency: result.currency,
       referenceType: result.referenceType,
-      paymentReference: result.paymentReference
+      paymentReference: result.paymentReference,
+      invoiceNumber: result.invoiceNumber,
+      invoiceDate: result.invoiceDate,
+      billingInformation: result.billingInformation
     });
 
     return result;
@@ -208,19 +216,28 @@ export function parseSwissQR(rawData) {
 /**
  * Build a formatted address string from parts
  */
-function buildAddress(streetOrLine1, buildingOrLine2, postalCode, city, country) {
+function buildAddress(streetOrLine1, buildingOrLine2, postalCode, city, country, addressType) {
   const parts = [];
   
-  if (streetOrLine1) {
-    if (buildingOrLine2 && !buildingOrLine2.match(/^\d{4,5}\s/)) {
-      // Building number or second line (not postal code)
-      parts.push(`${streetOrLine1} ${buildingOrLine2}`.trim());
-    } else {
-      parts.push(streetOrLine1);
-      if (buildingOrLine2) parts.push(buildingOrLine2);
+  if (addressType === 'S') {
+    // Structured: street + building number on same line
+    if (streetOrLine1) {
+      if (buildingOrLine2) {
+        parts.push(`${streetOrLine1} ${buildingOrLine2}`.trim());
+      } else {
+        parts.push(streetOrLine1);
+      }
     }
-  } else if (buildingOrLine2) {
-    parts.push(buildingOrLine2);
+  } else if (addressType === 'K') {
+    // Combined: two address lines
+    if (streetOrLine1) parts.push(streetOrLine1);
+    if (buildingOrLine2) parts.push(buildingOrLine2);
+  } else {
+    // Fallback
+    if (streetOrLine1) parts.push(streetOrLine1);
+    if (buildingOrLine2 && !buildingOrLine2.match(/^\d{4,5}\s/)) {
+      parts.push(buildingOrLine2);
+    }
   }
   
   if (postalCode || city) {
@@ -257,11 +274,18 @@ function formatReference(type, reference) {
 
 /**
  * Parse billing information from structured format
+ * Supports both Swico format (//S1/10/value/11/value) and generic format
  */
 function parseBillingInfo(billingStr, result) {
   if (!billingStr) return;
   
-  // Format: //[key]/[value]
+  // Check for Swico format: //S1/10/22600172/11/260201
+  if (billingStr.startsWith('//S1/')) {
+    parseSwicoFormat(billingStr, result);
+    return;
+  }
+  
+  // Generic format: //[key]/[value]
   const parts = billingStr.split('//');
   parts.forEach(part => {
     if (part.includes('/')) {
@@ -280,6 +304,103 @@ function parseBillingInfo(billingStr, result) {
         }
       }
     }
+  });
+}
+
+/**
+ * Parse Swico billing format
+ * Format: //S1/10/invoiceNo/11/invoiceDate/20/customerRef/30/vatNo/31/vatDate/32/vatDetails/40/conditions
+ * 
+ * Swico codes:
+ * 10 = Invoice number
+ * 11 = Invoice date (YYMMDD)
+ * 20 = Customer reference
+ * 30 = VAT number
+ * 31 = VAT date (YYMMDD;YYMMDD for start;end)
+ * 32 = VAT details (rate:amount;rate:amount)
+ * 40 = Payment conditions
+ */
+function parseSwicoFormat(billingStr, result) {
+  // Remove //S1/ prefix
+  const content = billingStr.replace(/^\/\/S1\//, '');
+  
+  // Split by / and process pairs
+  const parts = content.split('/');
+  
+  for (let i = 0; i < parts.length - 1; i += 2) {
+    const code = parts[i];
+    const value = parts[i + 1];
+    
+    if (!code || !value) continue;
+    
+    switch (code) {
+      case '10':
+        // Invoice number
+        result.invoiceNumber = value;
+        result.vendorInvoiceNo = value;
+        break;
+      case '11':
+        // Invoice date (YYMMDD format)
+        result.invoiceDate = formatSwicoDate(value);
+        result.invoiceDateRaw = value;
+        break;
+      case '20':
+        // Customer reference
+        result.customerReference = value;
+        break;
+      case '30':
+        // VAT number
+        result.vatNumber = value;
+        break;
+      case '31':
+        // VAT date range
+        result.vatDateRange = value;
+        break;
+      case '32':
+        // VAT details
+        result.vatDetails = value;
+        parseVatDetails(value, result);
+        break;
+      case '40':
+        // Payment conditions
+        result.paymentConditions = value;
+        break;
+      default:
+        // Store unknown codes for debugging
+        result[`swico_${code}`] = value;
+    }
+  }
+}
+
+/**
+ * Format Swico date from YYMMDD to YYYY-MM-DD
+ */
+function formatSwicoDate(dateStr) {
+  if (!dateStr || dateStr.length !== 6) return dateStr;
+  
+  const year = dateStr.substring(0, 2);
+  const month = dateStr.substring(2, 4);
+  const day = dateStr.substring(4, 6);
+  
+  // Assume 20xx for years
+  const fullYear = parseInt(year) > 50 ? `19${year}` : `20${year}`;
+  
+  return `${fullYear}-${month}-${day}`;
+}
+
+/**
+ * Parse VAT details from format like "8.1:123.45;2.6:67.89"
+ */
+function parseVatDetails(vatStr, result) {
+  if (!vatStr) return;
+  
+  const vatItems = vatStr.split(';');
+  result.vatBreakdown = vatItems.map(item => {
+    const [rate, amount] = item.split(':');
+    return {
+      rate: parseFloat(rate) || 0,
+      amount: parseFloat(amount) || 0
+    };
   });
 }
 
@@ -325,14 +446,26 @@ export function extractInvoiceData(qrData, ocrText = '') {
       vendorIBAN: '',
       debtorName: '',
       debtorAddress: '',
+      debtorPostalCode: '',
+      debtorCity: '',
+      debtorCountry: '',
       amount: 0,
+      totalAmount: '',
       currency: 'CHF',
       paymentReference: '',
       referenceType: '',
+      qrReference: '',
       message: '',
       vendorInvoiceNo: '',
       invoiceDate: '',
       description: '',
+      billingInformation: '',
+      customerReference: '',
+      vatNumber: '',
+      qrCodeVersion: '',
+      country: '',
+      rawText: '',
+      // For BC mapping (filled by n8n workflow)
       vendorNo: '',
       glAccount: '',
       dimension1: '',
@@ -349,20 +482,33 @@ export function extractInvoiceData(qrData, ocrText = '') {
     // Debtor/Payer info
     debtorName: qrData.debtorName || '',
     debtorAddress: qrData.debtorAddress || '',
+    debtorPostalCode: qrData.debtorPostalCode || '',
+    debtorCity: qrData.debtorCity || '',
+    debtorCountry: qrData.debtorCountry || '',
     
     // Payment details
     amount: qrData.amount || 0,
+    totalAmount: qrData.totalAmount || String(qrData.amount || ''),
     currency: qrData.currency || 'CHF',
     
     // Reference
     paymentReference: qrData.paymentReference || qrData.reference || '',
     referenceType: qrData.referenceType || '',
+    qrReference: qrData.qrReference || '',
     message: qrData.message || qrData.additionalInformation || '',
     
-    // Invoice details (may come from OCR or billing info)
-    vendorInvoiceNo: qrData.invoiceNumber || '',
+    // Invoice details (from Swico billing info)
+    vendorInvoiceNo: qrData.invoiceNumber || qrData.vendorInvoiceNo || '',
     invoiceDate: qrData.invoiceDate || '',
     description: qrData.message || qrData.additionalInformation || '',
+    billingInformation: qrData.billingInformation || '',
+    customerReference: qrData.customerReference || '',
+    vatNumber: qrData.vatNumber || '',
+    
+    // Metadata
+    qrCodeVersion: qrData.qrCodeVersion || qrData.version || '',
+    country: qrData.country || 'CH',
+    rawText: qrData.rawText || '',
     
     // For BC mapping (filled by n8n workflow)
     vendorNo: '',
