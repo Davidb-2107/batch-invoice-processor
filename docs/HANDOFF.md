@@ -7,7 +7,7 @@
 **Projet** : Application de traitement batch de factures PDF suisses avec QR-code  
 **Objectif** : Automatiser l'import de factures fournisseurs dans Microsoft Dynamics 365 Business Central  
 **Statut** : v1.6 - Fonctionnel avec BC Vendor Lookup, RAG Mandat Lookup amélioré et génération Excel JavaScript  
-**Dernière mise à jour** : 2026-01-09  
+**Dernière mise à jour** : 2026-01-23  
 
 ---
 
@@ -118,7 +118,8 @@ Respond to Webhook
     "shortcutDimension2Code": "93622",
     "sousMandatBC": "",
     "mandatFound": true,
-    "mandatConfidence": 0.95
+    "mandatConfidence": 0.95,
+    "description": "Quellensteuer janvier 2026"
   }]
 }
 ```
@@ -360,7 +361,7 @@ LIMIT 1
 7. Render table avec données enrichies (colonne "Axe 2")
 ```
 
-### Colonnes du tableau des factures (v1.5)
+### Colonnes du tableau des factures (v1.6)
 
 | Colonne | Source | Éditable | Tooltip |
 |---------|--------|----------|---------|
@@ -372,6 +373,7 @@ LIMIT 1
 | N° Fourn. | vendorNo | Oui | "Numéro fournisseur Business Central" |
 | Compte | glAccount | Oui | "Compte général (G/L Account)" |
 | **Axe 2** | shortcutDimension2Code | Oui | "Code raccourci axe 2 (Mandat BC)" |
+| **Description** | description | Oui | "Description de la facture" |
 | Statut | confidence + mandatFound | Non | "Statut de validation" |
 
 ### Indicateurs visuels et tooltips
@@ -474,7 +476,11 @@ LIMIT 1
 
 ## 📝 Changelog Technique
 
-### v1.6 (2026-01-09)
+### v1.6 (2026-01-23)
+- **Champ Description** : Nouvelle colonne "Description" dans le tableau des factures
+  - Affiche la description provenant du webhook (QR message ou OCR)
+  - Champ éditable en mode édition
+  - Source : `description` du payload de réponse webhook
 - **RAG Lookup Mandat amélioré** : Nouvelle requête SQL avec validation input
   - Ignore les recherches si debtorName est vide
   - Exige minimum 3 caractères
@@ -570,4 +576,4 @@ Je voudrais [DÉCRIS TA DEMANDE ICI]
 
 ---
 
-*Dernière mise à jour : 2026-01-09*
+*Dernière mise à jour : 2026-01-23*
