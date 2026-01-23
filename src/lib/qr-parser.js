@@ -5,7 +5,7 @@
  * Source: QR-reader/client/src/lib/qr-scanner.ts
  * Synced by GitHub Action
  * 
- * Last sync: 2026-01-10T09:13:20.092Z
+ * Last sync: 2026-01-23T15:45:00.000Z
  */
 
 /**
@@ -366,10 +366,14 @@ export function extractInvoiceData(parsedData) {
     swicoData = parseSwicoFormat(parsedData.billingInformation);
   }
   
+  // Get payment reference from parsed data
+  const paymentRef = parsedData.paymentReference || parsedData.reference || '';
+  
   return {
     // Vendor/Creditor information
     vendorName: parsedData.vendorName || parsedData.companyName || '',
     vendorAddress: parsedData.vendorAddress || '',
+    vendorIBAN: parsedData.iban || parsedData.accountNumber || '',
     creditorPostalCode: parsedData.creditorPostalCode || '',
     creditorCity: parsedData.creditorCity || '',
     creditorCountry: parsedData.creditorCountry || '',
@@ -379,9 +383,10 @@ export function extractInvoiceData(parsedData) {
     amount: parsedData.amount || parsedData.totalAmount || '',
     currency: parsedData.currency || 'CHF',
     
-    // Reference information
+    // Reference information - ensure paymentReference is included
     referenceType: parsedData.referenceType || '',
-    reference: parsedData.reference || parsedData.paymentReference || '',
+    reference: paymentRef,
+    paymentReference: paymentRef,  // Explicitly include paymentReference
     qrReference: parsedData.qrReference || '',
     
     // Debtor information
