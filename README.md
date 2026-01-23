@@ -2,7 +2,7 @@
 
 Application web pour le traitement en lot de factures PDF suisses avec QR-code, extraction OCR et génération de packages Excel pour Microsoft Dynamics 365 Business Central.
 
-![Version](https://img.shields.io/badge/version-1.6-blue)
+![Version](https://img.shields.io/badge/version-1.7-blue)
 ![React](https://img.shields.io/badge/React-18-61dafb)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -12,6 +12,7 @@ Application web pour le traitement en lot de factures PDF suisses avec QR-code, 
 - **📋 Format Swico** - Parsing des billing information (`//S1/10/invoiceNo/11/date...`)
 - **🔍 OCR Tesseract** - Reconnaissance optique pour données complémentaires
 - **🏢 BC Vendor Lookup** - Recherche automatique du fournisseur dans Business Central via IBAN
+- **🎯 RAG Mandat Lookup** - Attribution automatique du code mandat (Axe 2) via système RAG
 - **📊 Export Excel** - Génération de packages d'import pour BC Configuration Packages (JavaScript pur)
 - **🧠 RAG Learning** - Apprentissage des associations fournisseur/compte pour amélioration continue
 
@@ -88,7 +89,7 @@ Le parser Swiss QR est maintenu dans **QR-reader** (`client/src/lib/qr-scanner.t
 
 ```
 QR-reader                              batch-invoice-processor
-┌─────────────────────┐                ┌─────────────────────┐
+┌─────────────────────────────────────┐ ┌─────────────────────┐
 │ client/src/lib/     │    GitHub      │ src/lib/            │
 │ qr-scanner.ts       │ ──Action──►    │ qr-parser.js        │
 │ (TypeScript)        │   (auto)       │ (JavaScript)        │
@@ -139,7 +140,7 @@ REACT_APP_RAG_ENDPOINT=/rag-learning
 ### Batch Extract - Invoice Processor
 ```
 Webhook → Split Invoices → Tesseract OCR → Extract Invoice Data
-    → Vendor Lookup (PostgreSQL) → Merge Vendor Data → Aggregate Results → Respond
+    → Vendor Lookup (PostgreSQL) → RAG Mandat Lookup → Merge Data → Respond
 ```
 
 ### Batch Generate Excel - BC Package
@@ -148,8 +149,10 @@ Webhook → Generate Excel (JavaScript/SheetJS) → Respond with Binary
 ```
 
 Génère un fichier Excel avec 2 onglets :
-- **Purchase Invoice Header** : En-têtes de factures (44 colonnes)
+- **Purchase Invoice Header** : En-têtes de factures (42 colonnes)
+  - Inclut `Payment Reference` (colonne 41) et `Shortcut Dimension 2 Code` (colonne 15)
 - **Purchase Invoice Line** : Lignes de factures (38 colonnes)
+  - Inclut `Shortcut Dimension 2 Code` (colonne 17)
 
 ## 📊 Format de Réponse API
 
@@ -168,7 +171,10 @@ Génère un fichier Excel avec 2 onglets :
     "vendorFound": true,
     "vendorConfidence": "1.0",
     "amount": "41.30",
-    "paymentReference": "11 00000 00013 99416 00181 95183"
+    "paymentReference": "11 00000 00013 99416 00181 95183",
+    "shortcutDimension2Code": "M-2024-001",
+    "mandatFound": true,
+    "mandatConfidence": 0.95
   }]
 }
 ```
@@ -187,6 +193,17 @@ npm run build
 ```
 
 ## 📝 Changelog
+
+### v1.7 (2026-01-23)
+- ✅ **Fix: `paymentReference` correctement inclus dans le payload Excel**
+  - Ajout explicite dans `extractInvoiceData()` du parser QR
+  - Mapping vers colonne 41 "Payment Reference" du header
+- ✅ **Fix: `dimension2` synchronisé avec `shortcutDimension2Code`**
+  - Synchronisation à l'extraction OCR
+  - Synchronisation lors des modifications manuelles
+  - Mapping explicite dans le payload Excel
+- ✅ **Fix: Extension `.pdf` retirée de la colonne Description**
+  - Regex `replace(/\.[^/.]+$/, '')` appliqué au filename
 
 ### v1.6 (2026-01-10)
 - ✅ **Parser QR synchronisé automatiquement depuis QR-reader**
