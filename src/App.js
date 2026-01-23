@@ -467,6 +467,7 @@ function App() {
                     <th className="px-4 py-3 font-medium text-gray-600" title="Numéro fournisseur Business Central">N° Fourn.</th>
                     <th className="px-4 py-3 font-medium text-gray-600" title="Compte général (G/L Account)">Compte</th>
                     <th className="px-4 py-3 font-medium text-gray-600" title="Code raccourci axe 2 (Mandat BC)">Axe 2</th>
+                    <th className="px-4 py-3 font-medium text-gray-600" title="Description de la facture">Description</th>
                     <th className="px-4 py-3 font-medium text-gray-600" title="Statut de validation">Statut</th>
                     <th className="px-4 py-3 font-medium text-gray-600" title="Modifier cette ligne">Actions</th>
                   </tr>
@@ -551,11 +552,30 @@ function App() {
                             title="Entrer le code mandat (Axe 2)"
                           />
                         ) : (
-                          <span 
+                          <span
                             className={`font-mono ${invoice.shortcutDimension2Code ? 'text-purple-600 font-medium' : ''}`}
                             title={invoice.shortcutDimension2Code ? `Mandat trouvé via RAG: ${invoice.shortcutDimension2Code}` : 'Mandat non trouvé'}
                           >
                             {invoice.shortcutDimension2Code || '—'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {editingIndex === index ? (
+                          <input
+                            type="text"
+                            value={invoice.description}
+                            onChange={(e) => updateInvoice(index, 'description', e.target.value)}
+                            className="border rounded px-2 py-1 w-40"
+                            placeholder="Description"
+                            title="Modifier la description"
+                          />
+                        ) : (
+                          <span
+                            className="text-xs truncate block max-w-xs"
+                            title={invoice.description || 'Aucune description'}
+                          >
+                            {invoice.description || '—'}
                           </span>
                         )}
                       </td>
@@ -619,7 +639,7 @@ function App() {
 
         {/* Footer */}
         <div className="text-center text-gray-400 text-sm">
-          Batch Invoice Processor v1.5 • QR-code Swiss + OCR + BC Vendor + RAG Mandat Lookup • Business Central
+          Batch Invoice Processor v1.6 • QR-code Swiss + OCR + BC Vendor + RAG Mandat Lookup • Business Central
         </div>
       </div>
     </div>
