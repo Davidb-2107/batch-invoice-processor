@@ -146,7 +146,10 @@ function App() {
                 invoiceData.canton = ocr.canton || '';
                 
                 // RAG Mandat lookup results - Code raccourci axe 2
-                invoiceData.shortcutDimension2Code = ocr.shortcutDimension2Code || '';
+                // Map to both shortcutDimension2Code (for UI) and dimension2 (for Excel payload)
+                const mandatCode = ocr.shortcutDimension2Code || '';
+                invoiceData.shortcutDimension2Code = mandatCode;
+                invoiceData.dimension2 = mandatCode;  // Sync for Excel generation
                 invoiceData.mandatFound = ocr.mandatFound || false;
                 invoiceData.mandatConfidence = ocr.mandatConfidence || 0;
                 
@@ -199,6 +202,12 @@ function App() {
     setInvoices(prev => prev.map((inv, i) => {
       if (i === index) {
         const updated = { ...inv, [field]: value, modified: true };
+        
+        // Keep dimension2 and shortcutDimension2Code in sync
+        if (field === 'shortcutDimension2Code') {
+          updated.dimension2 = value;
+        }
+        
         if (updated.vendorNo && updated.amount) {
           updated.status = 'valid';
           updated.confidence = 1.0;
@@ -248,10 +257,21 @@ function App() {
         await saveModifications(invoice);
       }
 
+      // Prepare payload with properly mapped fields
+      const payload = {
+        invoices: invoices.map(inv => ({
+          ...inv,
+          // Ensure dimension2 is set from shortcutDimension2Code if not already
+          dimension2: inv.dimension2 || inv.shortcutDimension2Code || '',
+          // Ensure paymentReference is included
+          paymentReference: inv.paymentReference || ''
+        }))
+      };
+
       const response = await fetch(`${CONFIG.N8N_URL}${CONFIG.ENDPOINTS.GENERATE_EXCEL}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoices })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
@@ -642,7 +662,7 @@ function App() {
 
         {/* Footer */}
         <div className="text-center text-gray-400 text-sm">
-          Batch Invoice Processor v1.6 • QR-code Swiss + OCR + BC Vendor + RAG Mandat Lookup • Business Central
+          Batch Invoice Processor v1.7 • QR-code Swiss + OCR + BC Vendor + RAG Mandat Lookup • Business Central
         </div>
       </div>
     </div>
