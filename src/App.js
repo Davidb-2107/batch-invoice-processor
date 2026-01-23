@@ -119,13 +119,16 @@ function App() {
         // If we have QR data but need OCR for additional info, send to n8n
         if (result.imageBase64) {
           try {
+            // Remove file extension from filename before sending to n8n
+            const filenameWithoutExtension = file.name.replace(/\.[^/.]+$/, '');
+            
             const ocrResponse = await fetch(`${CONFIG.N8N_URL}${CONFIG.ENDPOINTS.EXTRACT}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 invoices: [{
                   base64: result.imageBase64,
-                  filename: file.name,
+                  filename: filenameWithoutExtension,
                   invoiceNumber: invoiceNumber,
                   qrData: result.invoiceData // Send QR data for enrichment
                 }]
