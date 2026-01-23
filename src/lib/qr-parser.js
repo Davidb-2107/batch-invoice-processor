@@ -306,6 +306,9 @@ function parseSwicoFormat(billingInfo) {
       case '40':
         result.paymentConditions = value;
         break;
+      default:
+        // Unknown Swico code - ignore silently
+        break;
     }
   }
   
