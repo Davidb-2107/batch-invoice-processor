@@ -6,8 +6,8 @@
 
 **Projet** : Application de traitement batch de factures PDF suisses avec QR-code  
 **Objectif** : Automatiser l'import de factures fournisseurs dans Microsoft Dynamics 365 Business Central  
-**Statut** : v1.6 - Fonctionnel avec BC Vendor Lookup, RAG Mandat Lookup amélioré et génération Excel JavaScript  
-**Dernière mise à jour** : 2026-01-09  
+**Statut** : v1.7 - Fonctionnel avec BC Vendor Lookup, RAG Mandat Lookup et génération Excel JavaScript  
+**Dernière mise à jour** : 2026-01-23  
 
 ---
 
@@ -128,7 +128,7 @@ Respond to Webhook
 - **Webhook** : `POST https://hen8n.com/webhook/batch-generate-excel`
 - **Statut** : ✅ Actif
 
-**Flux de données (v1.5)** :
+**Flux de données (v1.7)** :
 ```
 Webhook Generate Excel
     │
@@ -138,7 +138,8 @@ Generate Excel (Code - JavaScript)
     │ - Nettoie vendorName (supprime \n)
     │ - Crée 2 sheets : Header + Line
     │ - Type = "Compte général" (avec accents)
-    │ - Mappe shortcutDimension2Code vers "Shortcut Dimension 2 Code"
+    │ - Mappe shortcutDimension2Code vers colonne 15 (Header) et 17 (Line)
+    │ - Mappe paymentReference vers colonne 41 (Header)
     │ - Génère buffer Excel
     │ - Retourne binary via this.helpers.prepareBinaryData()
     ▼
@@ -160,6 +161,7 @@ Respond with Excel
     "amount": 41.30,
     "description": "Facture janvier",
     "dimension1": "TG",
+    "dimension2": "93622",
     "shortcutDimension2Code": "93622",
     "glAccount": "6000",
     "paymentReference": "11 00000 00013 99416..."
@@ -171,24 +173,25 @@ Respond with Excel
 
 | Onglet | Lignes | Colonnes |
 |--------|--------|----------|
-| Purchase Invoice Header | Row 1: Table name, Row 3: Headers, Row 4+: Data | 44 colonnes |
+| Purchase Invoice Header | Row 1: Table name, Row 3: Headers, Row 4+: Data | 42 colonnes |
 | Purchase Invoice Line | Row 1: Table name, Row 3: Headers, Row 4+: Data | 38 colonnes |
 
 **Colonnes principales Header** :
 - Document Type, No., Buy-from Vendor No., Pay-to Vendor No., Pay-to Name
 - Posting Date, Document Date, Due Date
-- Shortcut Dimension 1 Code (Canton)
-- **Shortcut Dimension 2 Code (Mandat)** ← Nouveau v1.5
-- Gen. Bus. Posting Group = "Compte général"
-- Payment Reference, Vendor Invoice No.
+- Shortcut Dimension 1 Code (Canton) - colonne 14
+- **Shortcut Dimension 2 Code (Mandat)** - colonne 15
+- Gen. Bus. Posting Group = "NATIONAL"
+- **Payment Reference** - colonne 41
+- Vendor Invoice No.
 
 **Colonnes principales Line** :
 - Document Type, Document No., Line No., Buy-from Vendor No.
-- Type = "Compte général"
+- Type = "G/L Account"
 - No. (G/L Account), Description
 - Direct Unit Cost, Amount, Line Amount
-- Shortcut Dimension 1 Code (Canton)
-- **Shortcut Dimension 2 Code (Mandat)** ← Nouveau v1.5
+- Shortcut Dimension 1 Code (Canton) - colonne 16
+- **Shortcut Dimension 2 Code (Mandat)** - colonne 17
 
 **Note technique importante** :
 > Le container n8n utilise Alpine Linux avec un Python "externally managed" (PEP 668).
@@ -315,32 +318,26 @@ LIMIT 1
 - Trouve "David Esteves Beles SA" quand `debtor_name` = "David Esteves Beles" (complet → partiel)
 - Robuste face aux variations de noms entre factures
 
-**Changements v1.6 vs v1.5** :
-- ❌ Suppression de la recherche par IBAN (maintenant uniquement par `debtorName`)
-- ✅ Ajout validation input vide
-- ✅ Ajout longueur minimale 3 caractères
-- ✅ Recherche bidirectionnelle ILIKE
-- ✅ TRIM() systématique sur le paramètre
-
 ---
 
 ## 📱 Frontend React
 
 ### Composants Principaux
 
-**App.js** - Composant principal (v1.5)
+**App.js** - Composant principal (v1.7)
 - State : files, invoices, isProcessing, editingIndex
 - Handlers : handleDrop, extractInvoices, generateExcel
-- **Nouveau** : Champ `shortcutDimension2Code` (Axe 2 / Mandat)
-- **Nouveau** : Indicateurs `mandatFound`, `mandatConfidence`
+- Champ `shortcutDimension2Code` synchronisé avec `dimension2`
+- Indicateurs `mandatFound`, `mandatConfidence`
 
 **lib/pdf-processor.js** - Conversion PDF
 - Utilise pdf.js pour render PDF → Canvas → JPEG
 - Détecte et extrait QR codes avec jsQR
 
-**lib/qr-parser.js** - Parser Swiss QR
+**lib/qr-parser.js** - Parser Swiss QR (⚠️ AUTO-GÉNÉRÉ)
 - Parse le format Swiss Payment Code (SPC)
-- Extrait : IBAN, vendorName, amount, reference, debtorName
+- Extrait : IBAN, vendorName, amount, reference, paymentReference, debtorName
+- **v1.7** : `extractInvoiceData()` inclut explicitement `paymentReference` et `vendorIBAN`
 
 ### Flux de données Frontend
 
@@ -349,18 +346,49 @@ LIMIT 1
     ↓
 2. PDFProcessor.processPDF()
     ↓ pdf.js render
-3. QRParser.parse() - extrait données QR (incl. debtorName)
+3. QRParser.parse() - extrait données QR (incl. debtorName, paymentReference)
     ↓
-4. fetch() → n8n /batch-extract
+4. extractInvoiceData() - formate les données (v1.7: paymentReference explicite)
     ↓
-5. Response avec vendorNo, vendorNameBC, amount, shortcutDimension2Code
+5. fetch() → n8n /batch-extract
     ↓
-6. setInvoices() - update state
+6. Response avec vendorNo, vendorNameBC, amount, shortcutDimension2Code
     ↓
-7. Render table avec données enrichies (colonne "Axe 2")
+7. setInvoices() - update state avec dimension2 = shortcutDimension2Code
+    ↓
+8. Render table avec données enrichies
 ```
 
-### Colonnes du tableau des factures (v1.5)
+### Synchronisation dimension2 ↔ shortcutDimension2Code (v1.7)
+
+Le frontend maintient la synchronisation entre `dimension2` et `shortcutDimension2Code` à deux endroits :
+
+1. **À l'extraction OCR** (dans `extractInvoices()`) :
+```javascript
+const mandatCode = ocr.shortcutDimension2Code || '';
+invoiceData.shortcutDimension2Code = mandatCode;
+invoiceData.dimension2 = mandatCode;  // Sync for Excel generation
+```
+
+2. **Lors des modifications manuelles** (dans `updateInvoice()`) :
+```javascript
+if (field === 'shortcutDimension2Code') {
+  updated.dimension2 = value;
+}
+```
+
+3. **Dans le payload Excel** (dans `generateExcel()`) :
+```javascript
+const payload = {
+  invoices: invoices.map(inv => ({
+    ...inv,
+    dimension2: inv.dimension2 || inv.shortcutDimension2Code || '',
+    paymentReference: inv.paymentReference || ''
+  }))
+};
+```
+
+### Colonnes du tableau des factures (v1.7)
 
 | Colonne | Source | Éditable | Tooltip |
 |---------|--------|----------|---------|
@@ -372,6 +400,7 @@ LIMIT 1
 | N° Fourn. | vendorNo | Oui | "Numéro fournisseur Business Central" |
 | Compte | glAccount | Oui | "Compte général (G/L Account)" |
 | **Axe 2** | shortcutDimension2Code | Oui | "Code raccourci axe 2 (Mandat BC)" |
+| Description | description | Oui | "Description de la facture" |
 | Statut | confidence + mandatFound | Non | "Statut de validation" |
 
 ### Indicateurs visuels et tooltips
@@ -431,9 +460,24 @@ LIMIT 1
 **Cause** : Mapping manquant dans App.js  
 **Solution** : Ajouter `amount: inv.amount || qrData?.amount` dans le mapping
 
-### Problème : Binary file not found at Tesseract OCR (RÉSOLU v1.5)
-**Cause** : Get Config node inséré entre Webhook et Split Invoices cassait le flux de données binaires  
-**Solution** : Modifier Split Invoices pour accéder aux données Webhook directement via `$('Webhook Batch Extract').first().json`
+### Problème : paymentReference vide dans Excel (RÉSOLU v1.7)
+**Cause** : Le champ n'était pas explicitement inclus dans `extractInvoiceData()` du parser QR  
+**Solution** : Ajout explicite dans qr-parser.js :
+```javascript
+const paymentRef = parsedData.paymentReference || parsedData.reference || '';
+return {
+  reference: paymentRef,
+  paymentReference: paymentRef,  // Explicitement inclus
+  // ...
+};
+```
+
+### Problème : dimension2 vide dans Excel (RÉSOLU v1.7)
+**Cause** : Le champ `dimension2` n'était pas synchronisé avec `shortcutDimension2Code`  
+**Solution** : Synchronisation à 3 endroits :
+1. À l'extraction OCR dans `extractInvoices()`
+2. Lors des modifications manuelles dans `updateInvoice()`
+3. Dans le payload Excel dans `generateExcel()`
 
 ### Problème : shortcutDimension2Code vide
 **Cause** : Pas de mapping dans invoice_vendor_mappings pour le debtorName  
@@ -443,6 +487,10 @@ LIMIT 1
 **Cause** : Recherche trop permissive avec des termes courts ou vides  
 **Solution** : Ajout validation input (min 3 caractères, ignore si vide) + recherche bidirectionnelle
 
+### Problème : Données non mises à jour après déploiement Vercel
+**Cause** : Cache navigateur contient l'ancien JavaScript  
+**Solution** : Forcer le rechargement avec **Ctrl+Shift+R** après chaque déploiement
+
 ---
 
 ## 🚀 Prochaines Étapes (Roadmap)
@@ -450,6 +498,7 @@ LIMIT 1
 ### Phase 4 : RAG Learning Amélioré
 - [x] ~~RAG Lookup Mandat (Code raccourci axe 2)~~ ✅ v1.5
 - [x] ~~Validation input et recherche bidirectionnelle~~ ✅ v1.6
+- [x] ~~Synchronisation dimension2/shortcutDimension2Code~~ ✅ v1.7
 - [ ] Auto-apprentissage : augmenter confidence après validation utilisateur
 - [ ] Apprentissage association vendorName → glAccount
 - [ ] Interface feedback utilisateur pour corrections
@@ -474,32 +523,33 @@ LIMIT 1
 
 ## 📝 Changelog Technique
 
-### v1.6 (2026-01-09)
-- **RAG Lookup Mandat amélioré** : Nouvelle requête SQL avec validation input
-  - Ignore les recherches si debtorName est vide
-  - Exige minimum 3 caractères
-  - Recherche bidirectionnelle (terme dans DB OU DB dans terme)
-  - TRIM() systématique pour nettoyer les espaces
-- **Suppression recherche IBAN** : Le RAG Mandat utilise maintenant uniquement debtorName
-- **Documentation** : Mise à jour HANDOFF.md avec explication détaillée de la logique
+### v1.7 (2026-01-23)
+- **Fix paymentReference** : Ajout explicite dans `extractInvoiceData()` du parser QR
+  - Le champ est maintenant correctement inclus dans le payload Excel (colonne 41)
+  - Utilise fallback : `parsedData.paymentReference || parsedData.reference || ''`
+- **Fix dimension2** : Synchronisation avec `shortcutDimension2Code`
+  - À l'extraction OCR dans `extractInvoices()`
+  - Lors des modifications manuelles dans `updateInvoice()`
+  - Dans le payload Excel dans `generateExcel()`
+- **Fix Description** : Extension `.pdf` retirée du filename avant envoi à n8n
+  - Regex `replace(/\.[^/.]+$/, '')` appliqué
+- **Documentation** : Mise à jour README.md et HANDOFF.md
+
+### v1.6 (2026-01-10)
+- **Parser QR synchronisé** : GitHub Action depuis QR-reader
+- **Support Swico complet** : //S1/10/invoiceNo/11/date...
+- **Conversion date** : YYMMDD → YYYY-MM-DD
 
 ### v1.5 (2026-01-09)
 - **RAG Lookup Mandat** : Nouveau nœud PostgreSQL pour lookup `invoice_vendor_mappings`
-- **shortcutDimension2Code** : Ajout du champ "Code raccourci axe 2" dans le workflow et le frontend
-- **Frontend** : Nouvelle colonne "Axe 2" avec affichage violet et édition
-- **Indicateur mandat** : Icône ◆ dans le statut quand mandat trouvé
-- **Tooltips UX** : Ajout de tooltips explicatifs sur tous les indicateurs, colonnes et boutons
-- **Fix binary data flow** : Correction du flux de données entre Webhook et Split Invoices
-
-### v1.5 (2026-01-08)
+- **shortcutDimension2Code** : Ajout du champ "Code raccourci axe 2"
 - **Excel Generation** : Réécrit en JavaScript pur avec SheetJS
-- **Workflow simplifié** : 3 nodes (Webhook → Code → Respond) au lieu de 5
+- **Workflow simplifié** : 3 nodes (Webhook → Code → Respond)
 - **Fix accents** : "Compte général" correctement encodé
-- **Suppression dépendances** : Plus de Python/openpyxl
+- **Tooltips UX** : Ajout sur tous les indicateurs
 
 ### v1.4 (2026-01-08)
 - **Fix amount display** : Ajout mapping amount dans App.js
-- **Commits** : 977891b, 9cec1ef
 
 ### v1.3 (2026-01-07)
 - **BC Vendor Lookup** : Intégration PostgreSQL via IBAN
@@ -521,13 +571,14 @@ Je travaille sur le projet Batch Invoice Processor pour Business Central.
 - GitHub : https://github.com/Davidb-2107/batch-invoice-processor
 
 **Architecture actuelle** :
-1. Frontend React scan QR Swiss Payment Code (incl. debtorName)
+1. Frontend React scan QR Swiss Payment Code (incl. debtorName, paymentReference)
 2. Envoie à n8n workflow (ID: U7TyGzvkwHiICE8H)
 3. OCR Tesseract + Vendor Lookup PostgreSQL (bc_vendors_prod)
 4. RAG Lookup Mandat (invoice_vendor_mappings) → shortcutDimension2Code
    - Recherche bidirectionnelle par debtorName (min 3 chars)
 5. Retourne vendorNo, vendorNameBC, canton, amount, shortcutDimension2Code
-6. Génération Excel via SheetJS (JavaScript pur) pour BC Configuration Package
+6. Frontend synchronise dimension2 = shortcutDimension2Code
+7. Génération Excel via SheetJS avec paymentReference (col 41) et dimension2 (col 15)
 
 **Stack** :
 - React 18, Tailwind, pdf.js, jsQR
@@ -558,7 +609,7 @@ Je voudrais [DÉCRIS TA DEMANDE ICI]
 
 ### Fichiers Clés
 - `src/App.js` - Logique principale React
-- `src/lib/qr-parser.js` - Parser Swiss QR
+- `src/lib/qr-parser.js` - Parser Swiss QR (⚠️ AUTO-GÉNÉRÉ depuis QR-reader)
 - `src/lib/pdf-processor.js` - PDF → Image + QR detection
 
 ---
@@ -570,4 +621,4 @@ Je voudrais [DÉCRIS TA DEMANDE ICI]
 
 ---
 
-*Dernière mise à jour : 2026-01-09*
+*Dernière mise à jour : 2026-01-23*
