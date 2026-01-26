@@ -85,6 +85,9 @@ function App() {
         // Prepare invoice data
         const invoiceNumber = getNextInvoiceNo(startingInvoiceNo, i);
         
+        // Remove file extension from filename for description
+        const filenameWithoutExtension = file.name.replace(/\.[^/.]+$/, '');
+        
         let invoiceData = {
           id: i,
           documentNo: invoiceNumber,
@@ -108,7 +111,8 @@ function App() {
           dueDate: '',
           paymentReference: result.invoiceData?.paymentReference || '',
           referenceType: result.invoiceData?.referenceType || '',
-          description: result.invoiceData?.message || '',
+          // FIX v1.7: Description = filename sans extension par défaut
+          description: filenameWithoutExtension,
           confidence: result.hasQR ? 0.9 : 0.3,
           status: result.hasQR ? 'warning' : 'error',
           modified: false,
@@ -119,9 +123,6 @@ function App() {
         // If we have QR data but need OCR for additional info, send to n8n
         if (result.imageBase64) {
           try {
-            // Remove file extension from filename before sending to n8n
-            const filenameWithoutExtension = file.name.replace(/\.[^/.]+$/, '');
-            
             const ocrResponse = await fetch(`${CONFIG.N8N_URL}${CONFIG.ENDPOINTS.EXTRACT}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -155,7 +156,7 @@ function App() {
                 
                 // OCR extracted data
                 invoiceData.vendorInvoiceNo = ocr.extractedInvoiceNumber || '';
-                invoiceData.description = invoiceData.description || ocr.description || '';
+                // Note: Keep description as filename, don't override with OCR
                 
                 // FIX: Map amount from OCR/n8n response
                 if (ocr.amount) {
@@ -264,7 +265,9 @@ function App() {
           // Ensure dimension2 is set from shortcutDimension2Code if not already
           dimension2: inv.dimension2 || inv.shortcutDimension2Code || '',
           // Ensure paymentReference is included
-          paymentReference: inv.paymentReference || ''
+          paymentReference: inv.paymentReference || '',
+          // Ensure description is included (should be filename without extension)
+          description: inv.description || ''
         }))
       };
 
@@ -490,7 +493,7 @@ function App() {
                     <th className="px-4 py-3 font-medium text-gray-600" title="Numéro fournisseur Business Central">N° Fourn.</th>
                     <th className="px-4 py-3 font-medium text-gray-600" title="Compte général (G/L Account)">Compte</th>
                     <th className="px-4 py-3 font-medium text-gray-600" title="Code raccourci axe 2 (Mandat BC)">Axe 2</th>
-                    <th className="px-4 py-3 font-medium text-gray-600" title="Description de la facture">Description</th>
+                    <th className="px-4 py-3 font-medium text-gray-600" title="Description de la facture (nom du fichier par défaut)">Description</th>
                     <th className="px-4 py-3 font-medium text-gray-600" title="Statut de validation">Statut</th>
                     <th className="px-4 py-3 font-medium text-gray-600" title="Modifier cette ligne">Actions</th>
                   </tr>
