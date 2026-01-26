@@ -100,7 +100,8 @@ function App() {
           vendorAddress: result.invoiceData?.vendorAddress || '',
           vendorIBAN: result.invoiceData?.vendorIBAN || '',
           debtorName: result.invoiceData?.debtorName || '',
-          vendorInvoiceNo: '',
+          // FIX v1.7: vendorInvoiceNo from QR invoiceNumber (priority), fallback to OCR
+          vendorInvoiceNo: result.invoiceData?.invoiceNumber || '',
           amount: result.invoiceData?.amount || 0,
           currency: result.invoiceData?.currency || 'CHF',
           glAccount: '',
@@ -154,8 +155,8 @@ function App() {
                 invoiceData.mandatFound = ocr.mandatFound || false;
                 invoiceData.mandatConfidence = ocr.mandatConfidence || 0;
                 
-                // OCR extracted data
-                invoiceData.vendorInvoiceNo = ocr.extractedInvoiceNumber || '';
+                // OCR extracted data - fallback only if QR didn't provide invoiceNumber
+                invoiceData.vendorInvoiceNo = invoiceData.vendorInvoiceNo || ocr.extractedInvoiceNumber || '';
                 // Note: Keep description as filename, don't override with OCR
                 
                 // FIX: Map amount from OCR/n8n response
@@ -267,7 +268,9 @@ function App() {
           // Ensure paymentReference is included
           paymentReference: inv.paymentReference || '',
           // Ensure description is included (should be filename without extension)
-          description: inv.description || ''
+          description: inv.description || '',
+          // Ensure vendorInvoiceNo is included
+          vendorInvoiceNo: inv.vendorInvoiceNo || ''
         }))
       };
 
