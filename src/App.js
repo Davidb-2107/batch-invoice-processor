@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { Upload, FileText, Download, Trash2, Edit2, Check, X, AlertCircle, Loader2, QrCode } from 'lucide-react';
 import { PDFProcessor } from './lib/pdf-processor';
+import { applyBulkFillToInvoice } from './lib/bulk-fill';
 
 // Configuration - Tout via n8n
 const CONFIG = {
@@ -20,6 +21,7 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [editingIndex, setEditingIndex] = useState(null);
+  const [bulkFill, setBulkFill] = useState({ vendorNo: '', glAccount: '', shortcutDimension2Code: '' });
   const [error, setError] = useState(null);
   const [progress, setProgress] = useState('');
 
@@ -218,6 +220,12 @@ function App() {
       }
       return inv;
     }));
+  };
+
+  // Appliquer une valeur commune à toutes les factures dont le champ est vide
+  // (logique pure dans lib/bulk-fill.js, testée).
+  const applyBulkFill = () => {
+    setInvoices(prev => prev.map(inv => applyBulkFillToInvoice(inv, bulkFill)));
   };
 
   // Sauvegarder les modifications (RAG Learning)
@@ -484,6 +492,46 @@ function App() {
             <h2 className="text-lg font-semibold text-gray-700 mb-4">
               Factures extraites ({invoices.length})
             </h2>
+
+            {/* Édition en masse : applique aux lignes dont le champ est vide */}
+            <div className="flex flex-wrap items-center gap-2 mb-4 p-3 bg-gray-50 rounded-lg">
+              <span className="text-sm font-medium text-gray-600 mr-1" title="N'écrase pas les lignes déjà remplies par le lookup BC / RAG">
+                Appliquer aux vides :
+              </span>
+              <input
+                type="text"
+                value={bulkFill.vendorNo}
+                onChange={(e) => setBulkFill(b => ({ ...b, vendorNo: e.target.value }))}
+                className="border rounded px-2 py-1 w-24"
+                placeholder="N° Fourn."
+                title="N° fournisseur BC à appliquer aux lignes vides"
+              />
+              <input
+                type="text"
+                value={bulkFill.glAccount}
+                onChange={(e) => setBulkFill(b => ({ ...b, glAccount: e.target.value }))}
+                className="border rounded px-2 py-1 w-24"
+                placeholder="Compte"
+                title="Compte général à appliquer aux lignes vides"
+              />
+              <input
+                type="text"
+                value={bulkFill.shortcutDimension2Code}
+                onChange={(e) => setBulkFill(b => ({ ...b, shortcutDimension2Code: e.target.value }))}
+                className="border rounded px-2 py-1 w-24"
+                placeholder="Axe 2"
+                title="Code axe 2 (mandat) à appliquer aux lignes vides"
+              />
+              <button
+                onClick={applyBulkFill}
+                disabled={!bulkFill.vendorNo.trim() && !bulkFill.glAccount.trim() && !bulkFill.shortcutDimension2Code.trim()}
+                className="bg-blue-600 text-white px-4 py-1.5 rounded-md hover:bg-blue-700 disabled:bg-gray-300 text-sm"
+                title="Remplir toutes les factures dont ces champs sont vides"
+              >
+                Appliquer
+              </button>
+            </div>
+
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
