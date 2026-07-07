@@ -112,6 +112,8 @@ function App() {
           shortcutDimension2Code: '',  // Code raccourci axe 2 (Mandat BC)
           postingDate: new Date().toISOString().split('T')[0],
           dueDate: '',
+          // Document Date = date de facture. QR (Swico) prioritaire, OCR en fallback (ligne ~170)
+          invoiceDate: result.invoiceData?.invoiceDate || '',
           paymentReference: result.invoiceData?.paymentReference || '',
           referenceType: result.invoiceData?.referenceType || '',
           // FIX v1.7: Description = filename sans extension par défaut
@@ -166,8 +168,8 @@ function App() {
                   invoiceData.amount = parseFloat(ocr.amount) || invoiceData.amount;
                 }
                 
-                // Map invoice date if available
-                if (ocr.invoiceDate) {
+                // Map invoice date from OCR only if QR (Swico) didn't provide one
+                if (ocr.invoiceDate && !invoiceData.invoiceDate) {
                   invoiceData.invoiceDate = ocr.invoiceDate;
                 }
                 
@@ -296,7 +298,8 @@ function App() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a')
       a.href = url;
-      a.download = `BC_Package_${new Date().toISOString().split('T')[0]}.xlsx`;
+      // n8n renvoie désormais un package RapidStart (.rapidstart) importable dans BC via "Importer package"
+      a.download = `BC_Package_${new Date().toISOString().split('T')[0]}.rapidstart`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
