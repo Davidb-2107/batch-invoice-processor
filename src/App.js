@@ -298,7 +298,8 @@ function App() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a')
       a.href = url;
-      a.download = `BC_Package_${new Date().toISOString().split('T')[0]}.xlsx`;
+      // n8n renvoie désormais un package RapidStart (.rapidstart) importable dans BC via "Importer package"
+      a.download = `BC_Package_${new Date().toISOString().split('T')[0]}.rapidstart`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
